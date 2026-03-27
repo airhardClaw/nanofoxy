@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
-
+logger.add("~/.nanobot/workspace/logs/{date}/llm-provider.log", rotation="1day")
 
 @dataclass
 class ToolCallRequest:

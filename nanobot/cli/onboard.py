@@ -11,6 +11,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - exercised in environments without wizard deps
     questionary = None
 from loguru import logger
+logger.add("~/.nanobot/workspace/logs/{date}-onboard.log", rotation="1day")
 from pydantic import BaseModel
 from rich.console import Console
 from rich.panel import Panel

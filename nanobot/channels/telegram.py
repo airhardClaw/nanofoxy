@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from loguru import logger
+logger.add("~/.nanobot/workspace/logs/{date}/telegram.log", rotation="1day")
 from pydantic import Field
 from telegram import BotCommand, ReactionTypeEmoji, ReplyParameters, Update
 from telegram.error import BadRequest, TimedOut

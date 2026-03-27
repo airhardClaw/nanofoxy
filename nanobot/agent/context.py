@@ -73,9 +73,9 @@ Skills with available="false" need dependencies installed first - you can try in
 - Use file tools when they are simpler or more reliable than shell commands.
 """
 
-        return f"""# nanobot 🐈
+        return f"""# nanoFoxy 🐈
 
-You are nanobot, a helpful AI assistant.
+You are nanoFoxy, a helpful AI assistant.
 
 ## Runtime
 {runtime}

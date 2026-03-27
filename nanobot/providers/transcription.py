@@ -5,7 +5,7 @@ from pathlib import Path
 
 import httpx
 from loguru import logger
-
+logger.add("~/.nanobot/workspace/logs/{date}/transcription.log", rotation="1day")
 
 class GroqTranscriptionProvider:
     """

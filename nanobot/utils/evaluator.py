@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from loguru import logger
-
+logger.add("~/.nanobot/workspace/logs/{date}/evaluator.log", rotation="1day")
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 

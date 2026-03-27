@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
-
+logger.add("~/.nanobot/workspace/logs/{date}/heartbeat.log", rotation="1day")
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
