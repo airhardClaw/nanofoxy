@@ -6,7 +6,7 @@ import asyncio
 from typing import Any
 
 from loguru import logger
-logger.add("~/.nanobot/workspace/logs/{date}/channel-manager.log", rotation="1day")
+logger.add("~/.nanobot/workspace/logs/{time}/channel-manager.log", rotation="1day")
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel

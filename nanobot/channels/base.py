@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-logger.add("~/.nanobot/workspace/logs/{date}/base-channel.log", rotation="1day")
+logger.add("~/.nanobot/workspace/logs/{time}/base-channel.log", rotation="1day")
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 

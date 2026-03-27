@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
-logger.add("~/.nanobot/workspace/logs/{date}/memory.log", rotation="1day")
+logger.add("~/.nanobot/workspace/logs/{time}/memory.log", rotation="1day")
 from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain
 
 if TYPE_CHECKING:

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-logger.add("~/.nanobot/workspace/logs/{date}/subagent.log", rotation="1day")
+logger.add("~/.nanobot/workspace/logs/{time}/subagent.log", rotation="1day")
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR

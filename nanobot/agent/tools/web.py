@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 import httpx
 from loguru import logger
-logger.add("~/.nanobot/workspace/logs/{date}/web.log", rotation="1day")
+logger.add("~/.nanobot/workspace/logs/{time}/web.log", rotation="1day")
 from nanobot.agent.tools.base import Tool
 from nanobot.utils.helpers import build_image_content_blocks
 
