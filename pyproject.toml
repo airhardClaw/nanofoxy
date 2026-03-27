@@ -1,5 +1,5 @@
 [project]
-name = "nanobot-ai"
+name = "nanofoxy-ai"
 version = "0.1.4.post6"
 description = "A lightweight personal AI assistant framework"
 readme = { file = "README.md", content-type = "text/markdown" }
