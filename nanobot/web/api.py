@@ -329,11 +329,23 @@ _DASHBOARD_HTML = """
         function renderSettings(config) {
             const channelsHtml = config.channels && Object.keys(config.channels).length > 0
                 ? Object.entries(config.channels).map(([name, settings]) => {
-                    const isEnabled = settings && (settings.enabled === true || settings === true);
+                    let isEnabled = false;
+                    let hasDetails = false;
+                    if (typeof settings === 'boolean') {
+                        isEnabled = settings;
+                    } else if (typeof settings === 'object' && settings !== null) {
+                        isEnabled = settings.enabled === true;
+                        hasDetails = !settings.masked && Object.keys(settings).length > 1;
+                    }
+                    const displayName = name.charAt(0).toUpperCase() + name.slice(1).replace(/([A-Z])/g, ' $1');
+                    let statusHtml = `<span style="color: ${isEnabled ? '#22c55e' : '#64748b'};">${isEnabled ? 'Enabled' : 'Disabled'}</span>`;
+                    if (hasDetails) {
+                        statusHtml = `<span style="color: ${isEnabled ? '#22c55e' : '#64748b'};">${isEnabled ? 'Enabled' : 'Disabled'}</span><span style="color: #64748b; margin-left: 8px; font-size: 0.75rem;">(configured)</span>`;
+                    }
                     return `
-                        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #334155;">
-                            <span style="color: #f1f5f9;">${name}</span>
-                            <span style="color: ${isEnabled ? '#22c55e' : '#64748b'};">${isEnabled ? 'Enabled' : 'Disabled'}</span>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #334155;">
+                            <span style="color: #f1f5f9;">${displayName}</span>
+                            ${statusHtml}
                         </div>
                     `;
                 }).join('')

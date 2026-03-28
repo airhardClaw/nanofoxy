@@ -124,17 +124,67 @@ async def get_config(request: Request) -> dict[str, Any]:
     if not config:
         return {}
 
-    return {
-        "model": config.agents.defaults.model if hasattr(config, 'agents') else None,
-        "provider": config.agents.defaults.provider if hasattr(config, 'agents') else None,
-        "timezone": config.agents.defaults.timezone if hasattr(config, 'agents') else "UTC",
-        "workspace": str(config.workspace_path) if config else None,
-        "channels": {
-            name: getattr(config.channels, name, None)
-            for name in dir(config.channels)
-            if not name.startswith('_')
-        } if hasattr(config, 'channels') else {},
+    result = {
+        "model": None,
+        "provider": None,
+        "timezone": "UTC",
+        "workspace": None,
+        "channels": {},
     }
+
+    try:
+        if hasattr(config, 'agents') and hasattr(config.agents, 'defaults'):
+            defaults = config.agents.defaults
+            result["model"] = getattr(defaults, 'model', None)
+            result["provider"] = getattr(defaults, 'provider', None)
+            result["timezone"] = getattr(defaults, 'timezone', 'UTC')
+    except Exception:
+        pass
+
+    try:
+        if config and hasattr(config, 'workspace_path'):
+            result["workspace"] = str(config.workspace_path)
+    except Exception:
+        pass
+
+    try:
+        if hasattr(config, 'channels'):
+            channels = config.channels
+            if channels:
+                channel_data = channels.model_dump() if hasattr(channels, 'model_dump') else {}
+                sensitive_patterns = ['token', 'password', 'secret', 'api_key', 'apikey', 'appsecret', 'clientsecret', 
+                                      'accesstoken', 'webhook', 'encryptkey', 'verification', 'imap', 'smtp',
+                                      'cookie', 'auth', 'bottoken']
+                
+                for key, val in channel_data.items():
+                    if key.startswith('_'):
+                        continue
+                    if callable(val):
+                        continue
+                    
+                    if isinstance(val, dict):
+                        filtered_val = {}
+                        has_enabled = False
+                        for sub_key, sub_val in val.items():
+                            sub_key_lower = sub_key.lower()
+                            if any(pattern in sub_key_lower for pattern in sensitive_patterns):
+                                if isinstance(sub_val, str) and sub_val:
+                                    filtered_val[sub_key] = "[REDACTED]"
+                                else:
+                                    filtered_val[sub_key] = "[REDACTED]"
+                            else:
+                                filtered_val[sub_key] = sub_val
+                                if sub_key == 'enabled':
+                                    has_enabled = sub_val
+                        result["channels"][key] = filtered_val
+                    elif isinstance(val, bool):
+                        result["channels"][key] = {"enabled": val}
+                    else:
+                        result["channels"][key] = val
+    except Exception:
+        pass
+
+    return result
 
 
 @router.websocket("/ws/events")
