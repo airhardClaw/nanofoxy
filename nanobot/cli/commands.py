@@ -502,6 +502,8 @@ def gateway(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    web: bool = typer.Option(False, "--web", help="Enable web dashboard (runs on port 18791)"),
+    web_port: int = typer.Option(18791, "--web-port", help="Web dashboard port"),
 ):
     """Start the nanobot gateway."""
     from nanobot.agent.loop import AgentLoop
@@ -674,7 +676,26 @@ def gateway(
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
+    if web:
+        console.print(f"[green]✓[/green] Web dashboard: http://127.0.0.1:{web_port}")
+
     async def run():
+        tasks = []
+
+        if web:
+            from nanobot.web.api import run_server as run_web_server
+            web_task = asyncio.create_task(
+                run_web_server(
+                    config=config,
+                    session_manager=session_manager,
+                    cron_service=cron,
+                    channels=channels,
+                    host="127.0.0.1",
+                    port=web_port,
+                )
+            )
+            tasks.append(web_task)
+
         try:
             await cron.start()
             await heartbeat.start()
@@ -689,6 +710,12 @@ def gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
+            for task in tasks:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
@@ -697,6 +724,68 @@ def gateway(
 
     asyncio.run(run())
 
+
+# ============================================================================
+# Web Dashboard Command
+# ============================================================================
+
+
+@app.command("web")
+def web(
+    port: int = typer.Option(18791, "--port", "-p", help="Web dashboard port"),
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Web dashboard host"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Start the NanoFoxy web dashboard (API only, no agent loop)."""
+    try:
+        from fastapi import FastAPI
+        import uvicorn
+    except ImportError:
+        console.print("[red]Error: Web dependencies not installed.[/red]")
+        console.print("Run: pip install nanofoxy-ai[web]")
+        raise typer.Exit(1)
+
+    config_obj = _load_runtime_config(config, workspace)
+    session_manager = None
+    cron_service = None
+    channels = None
+
+    try:
+        from nanobot.session.manager import SessionManager
+        session_manager = SessionManager(config_obj.workspace_path)
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not load session manager: {e}[/yellow]")
+
+    try:
+        from nanobot.cron.service import CronService
+        cron_store_path = config_obj.workspace_path / "cron" / "jobs.json"
+        cron_service = CronService(cron_store_path)
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not load cron service: {e}[/yellow]")
+
+    async def run_web():
+        from nanobot.web.api import create_app
+
+        app = create_app(
+            config=config_obj,
+            session_manager=session_manager,
+            cron_service=cron_service,
+            channels=channels,
+        )
+
+        config_uvicorn = uvicorn.Config(
+            app,
+            host=host,
+            port=port,
+            log_level="info",
+        )
+        server = uvicorn.Server(config_uvicorn)
+        await server.serve()
+
+    console.print(f"{__logo__} Starting web dashboard at http://{host}:{port}")
+    console.print(f"[dim]Press Ctrl+C to stop[/dim]")
+    asyncio.run(run_web())
 
 
 

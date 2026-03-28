@@ -1,0 +1,12 @@
+{
+  "name": "nanofoxy-ui",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "paperclip designer --open",
+    "build": "paperclip build"
+  },
+  "dependencies": {
+    "paperclip-ui": "^18.5.6"
+  }
+}

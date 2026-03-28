@@ -1,0 +1,106 @@
+/**
+ * NanoFoxy UI - Sessions Page
+ */
+
+import { fetchSessions, fetchSession, clearSession } from '../api';
+
+public component Sessions {
+  property onBack: () => void
+
+  state sessions: Array<{
+    key: string,
+    created_at: string,
+    updated_at: string
+  }> = []
+
+  state selectedSession: {
+    key: string,
+    messages: Array<{
+      role: string,
+      content: string,
+      timestamp: string
+    }>
+  } = null
+
+  state loading: boolean = true
+
+  onMount() {
+    this.loadSessions();
+  }
+
+  async loadSessions() {
+    try {
+      this.sessions = await fetchSessions();
+      this.loading = false;
+    } catch (e) {
+      this.loading = false;
+    }
+  }
+
+  async onSessionClick(key: string) {
+    try {
+      this.selectedSession = await fetchSession(key);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async onClearSession(key: string) {
+    if (confirm(`Clear session "${key}"?`)) {
+      try {
+        await clearSession(key);
+        await this.loadSessions();
+        this.selectedSession = null;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
+
+  render div(class: "sessions-page") {
+    if loading {
+      div(class: "loading", "Loading...")
+    } else if selectedSession {
+      div(class: "card") {
+        div(style: "display: flex; justify-content: space-between; margin-bottom: 20px;") {
+          h2("Session: " + selectedSession.key)
+          button(onClick: () => { selectedSession = null; }, "← Back")
+        }
+        button(
+          onClick: () => onClearSession(selectedSession.key),
+          style: "margin-bottom: 16px; background: #ef4444;",
+          "Clear Session"
+        )
+        div(class: "sessions-list") {
+          for message in selectedSession.messages {
+            div(
+              class: "session-item",
+              style: message.role === 'user' ? 'background: #1e3a5f;' : ''
+            ) {
+              div(class: "session-key", message.role)
+              div(style: "white-space: pre-wrap; font-size: 0.875rem;", message.content || '')
+            }
+          }
+        }
+      }
+    } else {
+      div(class: "card") {
+        h2("All Sessions")
+        div(class: "sessions-list") {
+          for session in sessions {
+            div(class: "session-item", onClick: () => onSessionClick(session.key)) {
+              div(class: "session-key", session.key)
+              div(class: "session-time", formatDate(session.updated_at))
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+function formatDate(isoString: string): string {
+  if (!isoString) return 'N/A';
+  const d = new Date(isoString);
+  return d.toLocaleString();
+}

@@ -1,0 +1,28 @@
+/**
+ * NanoFoxy UI - Cron Jobs Component
+ */
+
+public component CronJobs {
+  property jobs: Array<{
+    id: string,
+    name: string,
+    schedule: string
+  }>
+
+  render div(class: "card") {
+    h2("Scheduled Tasks")
+
+    if jobs.length > 0 {
+      div(class: "sessions-list") {
+        for job in jobs {
+          div(class: "session-item") {
+            div(class: "session-key", job.name)
+            div(class: "session-time", job.schedule)
+          }
+        }
+      }
+    } else {
+      span(class: "stat-label", "No scheduled tasks")
+    }
+  }
+}

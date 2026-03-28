@@ -1,0 +1,100 @@
+/**
+ * NanoFoxy UI - Settings Page
+ */
+
+import { fetchConfig } from '../api';
+
+public component Settings {
+  state config: {
+    model: string,
+    provider: string,
+    timezone: string,
+    workspace: string,
+    channels: Record<string, unknown>
+  } = null
+
+  state loading: boolean = true
+
+  onMount() {
+    this.loadConfig();
+  }
+
+  async loadConfig() {
+    try {
+      this.config = await fetchConfig();
+      this.loading = false;
+    } catch (e) {
+      this.loading = false;
+    }
+  }
+
+  render div(class: "settings-page") {
+    if loading {
+      div(class: "loading", "Loading...")
+    } else if config {
+      div(class: "card") {
+        h2("Agent Configuration")
+
+        div(class: "config-section") {
+          h3("Model Settings")
+          div(class: "config-row") {
+            label("Model")
+            span(config.model || 'Not configured')
+          }
+          div(class: "config-row") {
+            label("Provider")
+            span(config.provider || 'Not configured')
+          }
+          div(class: "config-row") {
+            label("Timezone")
+            span(config.timezone || 'UTC')
+          }
+        }
+
+        div(class: "config-section") {
+          h3("Workspace")
+          div(class: "config-row") {
+            label("Path")
+            span(style: "word-break: break-all;", config.workspace || 'N/A')
+          }
+        }
+
+        div(class: "config-section") {
+          h3("Channels")
+          if config.channels && Object.keys(config.channels).length > 0 {
+            for name, settings of config.channels {
+              div(class: "channel-config") {
+                span(class: "channel-name", name)
+                span(class: "channel-status", isEnabled(settings) ? 'Enabled' : 'Disabled')
+              }
+            }
+          } else {
+            span(class: "stat-label", "No channels configured")
+          }
+        }
+
+        div(class: "config-section") {
+          h3("Actions")
+          div(style: "margin-top: 16px;") {
+            a(
+              href: config.workspace,
+              style: "color: #38bdf8; text-decoration: none;",
+              "Open Workspace Directory"
+            )
+          }
+        }
+      }
+    } else {
+      div(class: "error", "Failed to load configuration")
+    }
+  }
+}
+
+function isEnabled(settings: unknown): boolean {
+  if (!settings) return false;
+  if (typeof settings === 'boolean') return settings;
+  if (typeof settings === 'object' && settings !== null) {
+    return (settings as Record<string, unknown>).enabled === true;
+  }
+  return false;
+}

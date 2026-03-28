@@ -1,0 +1,21 @@
+/**
+ * NanoFoxy UI - Channel Status Component
+ */
+
+public component ChannelStatus {
+  property channels: string[]
+
+  render div(class: "card") {
+    h2("Channels")
+
+    div(class: "channel-list") {
+      if channels.length > 0 {
+        for channel in channels {
+          span(class: "channel-tag", channel)
+        }
+      } else {
+        span(class: "stat-label", "No channels enabled")
+      }
+    }
+  }
+}

@@ -1,0 +1,31 @@
+/**
+ * NanoFoxy UI - Session List Component
+ */
+
+public component SessionList {
+  property sessions: Array<{
+    key: string,
+    created_at: string,
+    updated_at: string
+  }>
+  property onSelect: (key: string) => void
+
+  render div(class: "card") {
+    h2("Recent Sessions")
+
+    div(class: "sessions-list") {
+      for session in sessions {
+        div(class: "session-item", onClick: () => onSelect(session.key)) {
+          div(class: "session-key", session.key)
+          div(class: "session-time", formatDate(session.updated_at))
+        }
+      }
+    }
+  }
+}
+
+function formatDate(isoString: string): string {
+  if (!isoString) return 'N/A';
+  const d = new Date(isoString);
+  return d.toLocaleString();
+}

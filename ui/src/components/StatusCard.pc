@@ -1,0 +1,38 @@
+/**
+ * NanoFoxy UI - Status Card Component
+ */
+
+public component StatusCard {
+  property model: string
+  property provider: string
+  property uptime: number
+  property workspace: string
+
+  render div(class: "card") {
+    h2("Agent Status")
+
+    div(class: "stat") {
+      span(class: "stat-label", "Model")
+      span(class: "stat-value", model)
+    }
+
+    div(class: "stat") {
+      span(class: "stat-label", "Provider")
+      span(class: "stat-value", provider)
+    }
+
+    div(class: "stat") {
+      span(class: "stat-label", "Uptime")
+      span(class: "stat-value", formatUptime(uptime))
+    }
+  }
+}
+
+function formatUptime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}

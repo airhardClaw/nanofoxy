@@ -1,0 +1,73 @@
+/**
+ * NanoFoxy UI - Dashboard Page
+ */
+
+import { fetchStatus, fetchSessions, fetchCronJobs } from '../api';
+
+public component Dashboard {
+  state status: {
+    model: string,
+    provider: string,
+    workspace: string,
+    channels_enabled: string[],
+    cron_jobs: number,
+    uptime_seconds: number
+  } = null
+
+  state sessions: Array<{
+    key: string,
+    created_at: string,
+    updated_at: string
+  }> = []
+
+  state cronJobs: Array<{
+    id: string,
+    name: string,
+    schedule: string
+  }> = []
+
+  state loading: boolean = true
+  state error: string = null
+
+  onMount() {
+    this.loadData();
+  }
+
+  async loadData() {
+    try {
+      const [statusData, sessionsData, cronData] = await Promise.all([
+        fetchStatus(),
+        fetchSessions(),
+        fetchCronJobs()
+      ]);
+      this.status = statusData;
+      this.sessions = sessionsData;
+      this.cronJobs = cronData;
+      this.loading = false;
+    } catch (e) {
+      this.error = e.message;
+      this.loading = false;
+    }
+  }
+
+  onSessionSelect(key: string) {
+    if (this.onSessionClick) {
+      this.onSessionClick(key);
+    }
+  }
+
+  render div(class: "dashboard") {
+    if loading {
+      div(class: "loading", "Loading...")
+    } else if error {
+      div(class: "error", error)
+    } else {
+      div(class: "grid") {
+        StatusCard(status)
+        ChannelStatus(status.channels_enabled)
+        CronJobs(cronJobs)
+      }
+      SessionList(sessions, onSessionSelect)
+    }
+  }
+}

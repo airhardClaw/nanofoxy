@@ -1,0 +1,8 @@
+{
+  "entry": "./src/App.pc",
+  "outputDir": "./dist",
+  "compilerOptions": {
+    "react": false,
+    "styled": true
+  }
+}
