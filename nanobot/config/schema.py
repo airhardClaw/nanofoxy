@@ -141,6 +141,19 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
+
+class PaperclipConfig(Base):
+    """Paperclip task management integration configuration."""
+
+    enabled: bool = False  # Enable Paperclip integration
+    api_url: str = "http://127.0.0.1:3100"  # Paperclip API URL
+    company_id: str = ""  # Company ID in Paperclip
+    agent_id: str = ""  # Agent ID for task assignment
+    poll_interval_seconds: int = 300  # How often to poll for new tasks (5 minutes default)
+    auto_claim: bool = True  # Automatically claim tasks when found
+    default_assignee: str = ""  # Default assignee for new tasks
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
@@ -148,6 +161,7 @@ class ToolsConfig(Base):
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
+    paperclip: PaperclipConfig = Field(default_factory=PaperclipConfig)  # Paperclip integration
 
 
 class Config(BaseSettings):

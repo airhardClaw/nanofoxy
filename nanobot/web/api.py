@@ -59,8 +59,9 @@ def create_app(
     app.state.start_time = start_time or time.time()
     app.state.websockets: list[WebSocket] = []
 
-    from nanobot.web.routes import router
+    from nanobot.web.routes import router, register_paperclip_routes
     app.include_router(router)
+    register_paperclip_routes(app)
 
     @app.get("/", response_class=HTMLResponse)
     async def root():

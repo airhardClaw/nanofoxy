@@ -504,6 +504,7 @@ def gateway(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     web: bool = typer.Option(False, "--web", help="Enable web dashboard (runs on port 18791)"),
     web_port: int = typer.Option(18791, "--web-port", help="Web dashboard port"),
+    paperclip_poll: bool = typer.Option(False, "--paperclip-poll", help="Enable Paperclip task polling"),
 ):
     """Start the nanobot gateway."""
     from nanobot.agent.loop import AgentLoop
@@ -679,6 +680,22 @@ def gateway(
     if web:
         console.print(f"[green]✓[/green] Web dashboard: http://127.0.0.1:{web_port}")
 
+    paperclip_poller = None
+    if paperclip_poll:
+        pc_config = config.tools.paperclip
+        if pc_config and getattr(pc_config, 'enabled', False):
+            from nanobot.paperclip.poller import PaperclipTaskPoller
+            paperclip_poller = PaperclipTaskPoller(
+                api_url=pc_config.api_url,
+                company_id=pc_config.company_id,
+                agent_id=pc_config.agent_id,
+                interval_seconds=pc_config.poll_interval_seconds,
+                auto_claim=pc_config.auto_claim,
+            )
+            console.print(f"[green]✓[/green] Paperclip polling: every {pc_config.poll_interval_seconds}s")
+        else:
+            console.print("[yellow]Warning: Paperclip enabled but not configured[/yellow]")
+
     async def run():
         tasks = []
 
@@ -695,6 +712,10 @@ def gateway(
                 )
             )
             tasks.append(web_task)
+
+        if paperclip_poller:
+            await paperclip_poller.start()
+            tasks.append(asyncio.create_task(paperclip_poller._task))
 
         try:
             await cron.start()
@@ -716,6 +737,8 @@ def gateway(
                     await task
                 except asyncio.CancelledError:
                     pass
+            if paperclip_poller:
+                await paperclip_poller.stop()
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
@@ -1145,6 +1168,66 @@ def channels_login(
 # ============================================================================
 # Plugin Commands
 # ============================================================================
+
+paperclip_app = typer.Typer(help="Manage Paperclip tasks")
+app.add_typer(paperclip_app, name="paperclip")
+
+
+@paperclip_app.command("list")
+def paperclip_list(
+    status: str | None = typer.Option(None, "--status", "-s", help="Filter by status"),
+    priority: str | None = typer.Option(None, "--priority", "-p", help="Filter by priority"),
+    limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
+):
+    """List tasks from Paperclip."""
+    from nanobot.paperclip.cli import list_tasks
+    list_tasks(status=status, priority=priority, limit=limit)
+
+
+@paperclip_app.command("fetch")
+def paperclip_fetch():
+    """Fetch tasks assigned to this agent."""
+    from nanobot.paperclip.cli import fetch_tasks
+    fetch_tasks()
+
+
+@paperclip_app.command("show")
+def paperclip_show(issue_id: str = typer.Argument(..., help="Issue ID")):
+    """Show task details."""
+    from nanobot.paperclip.cli import show_task
+    show_task(issue_id)
+
+
+@paperclip_app.command("complete")
+def paperclip_complete(
+    issue_id: str = typer.Argument(..., help="Issue ID"),
+    comment: str | None = typer.Option(None, "--comment", "-c", help="Completion comment"),
+):
+    """Mark a task as completed."""
+    from nanobot.paperclip.cli import complete_task
+    complete_task(issue_id, comment)
+
+
+@paperclip_app.command("update")
+def paperclip_update(
+    issue_id: str = typer.Argument(..., help="Issue ID"),
+    status: str | None = typer.Option(None, "--status", "-s", help="New status"),
+    priority: str | None = typer.Option(None, "--priority", "-p", help="New priority"),
+):
+    """Update task status or priority."""
+    from nanobot.paperclip.cli import update_task
+    update_task(issue_id, status=status, priority=priority)
+
+
+@paperclip_app.command("comment")
+def paperclip_comment(
+    issue_id: str = typer.Argument(..., help="Issue ID"),
+    body: str = typer.Argument(..., help="Comment text"),
+):
+    """Add a comment to a task."""
+    from nanobot.paperclip.cli import add_comment
+    add_comment(issue_id, body)
+
 
 plugins_app = typer.Typer(help="Manage channel plugins")
 app.add_typer(plugins_app, name="plugins")

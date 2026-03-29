@@ -205,3 +205,187 @@ async def websocket_events(websocket: WebSocket):
         pass
     except Exception:
         pass
+
+
+# ============================================================================
+# Paperclip Task Routes
+# ============================================================================
+
+paperclip_router = APIRouter(prefix="/api/paperclip")
+
+
+def _get_paperclip_client(request: Request):
+    """Get Paperclip client from app state or create from config."""
+    config = request.app.state.config
+    if not config:
+        return None
+
+    pc_config = getattr(config.tools, 'paperclip', None)
+    if not pc_config:
+        return None
+
+    from nanobot.paperclip.client import PaperclipClient
+    return PaperclipClient(
+        api_url=pc_config.api_url,
+        company_id=pc_config.company_id,
+        agent_id=pc_config.agent_id,
+    )
+
+
+@paperclip_router.get("/tasks")
+async def list_paperclip_tasks(
+    request: Request,
+    status: str | None = None,
+    priority: str | None = None,
+) -> dict[str, Any]:
+    """List tasks from Paperclip."""
+    client = _get_paperclip_client(request)
+    if not client:
+        return {"error": "Paperclip not configured"}
+
+    try:
+        tasks = await client.list_issues(status=status, priority=priority)
+        return {
+            "tasks": [
+                {
+                    "id": t.id,
+                    "title": t.title,
+                    "status": t.status,
+                    "priority": t.priority,
+                    "identifier": t.identifier,
+                    "description": t.description,
+                    "created_at": t.created_at.isoformat() if t.created_at else None,
+                    "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+                }
+                for t in tasks
+            ],
+            "count": len(tasks),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        await client.close()
+
+
+@paperclip_router.get("/tasks/{issue_id}")
+async def get_paperclip_task(issue_id: str, request: Request) -> dict[str, Any]:
+    """Get a specific Paperclip task."""
+    client = _get_paperclip_client(request)
+    if not client:
+        return {"error": "Paperclip not configured"}
+
+    try:
+        task = await client.get_issue(issue_id)
+        return {
+            "id": task.id,
+            "title": task.title,
+            "description": task.description,
+            "status": task.status,
+            "priority": task.priority,
+            "identifier": task.identifier,
+            "created_at": task.created_at.isoformat() if task.created_at else None,
+            "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+            "started_at": task.started_at.isoformat() if task.started_at else None,
+            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        await client.close()
+
+
+@paperclip_router.post("/tasks/{issue_id}/complete")
+async def complete_paperclip_task(
+    issue_id: str,
+    request: Request,
+    comment: str | None = None,
+) -> dict[str, Any]:
+    """Mark a Paperclip task as completed."""
+    client = _get_paperclip_client(request)
+    if not client:
+        return {"error": "Paperclip not configured"}
+
+    try:
+        if comment:
+            await client.add_comment(
+                issue_id=issue_id,
+                body=comment,
+                author_agent_id=client.agent_id,
+            )
+        task = await client.complete_issue(issue_id)
+        return {
+            "status": "ok",
+            "message": f"Task {task.identifier or issue_id} completed",
+            "task": {
+                "id": task.id,
+                "status": task.status,
+            },
+        }
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        await client.close()
+
+
+@paperclip_router.post("/tasks/{issue_id}/comment")
+async def add_paperclip_comment(
+    issue_id: str,
+    request: Request,
+    body: str,
+) -> dict[str, Any]:
+    """Add a comment to a Paperclip task."""
+    client = _get_paperclip_client(request)
+    if not client:
+        return {"error": "Paperclip not configured"}
+
+    try:
+        comment = await client.add_comment(
+            issue_id=issue_id,
+            body=body,
+            author_agent_id=client.agent_id,
+        )
+        return {
+            "status": "ok",
+            "comment": {
+                "id": comment.id,
+                "body": comment.body,
+                "created_at": comment.created_at.isoformat() if comment.created_at else None,
+            },
+        }
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        await client.close()
+
+
+@paperclip_router.get("/my-tasks")
+async def get_my_tasks(request: Request) -> dict[str, Any]:
+    """Get tasks assigned to this agent."""
+    client = _get_paperclip_client(request)
+    if not client:
+        return {"error": "Paperclip not configured"}
+
+    try:
+        tasks = await client.get_todo_tasks()
+        return {
+            "tasks": [
+                {
+                    "id": t.id,
+                    "title": t.title,
+                    "description": t.description,
+                    "priority": t.priority,
+                    "identifier": t.identifier,
+                }
+                for t in tasks
+            ],
+            "count": len(tasks),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        await client.close()
+
+
+# Register paperclip router in main app
+def register_paperclip_routes(app):
+    app.include_router(paperclip_router)
