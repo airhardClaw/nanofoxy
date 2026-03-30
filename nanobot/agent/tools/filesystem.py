@@ -2,9 +2,11 @@
 
 import difflib
 import mimetypes
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
 from nanobot.agent.tools.base import Tool
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
@@ -38,6 +40,8 @@ def _is_under(path: Path, directory: Path) -> bool:
 class _FsTool(Tool):
     """Shared base for filesystem tools — common init and path resolution."""
 
+    _MAX_FILE_BACKUPS = 3
+
     def __init__(
         self,
         workspace: Path | None = None,
@@ -50,6 +54,58 @@ class _FsTool(Tool):
 
     def _resolve(self, path: str) -> Path:
         return _resolve_path(path, self._workspace, self._allowed_dir, self._extra_allowed_dirs)
+
+    def _get_backup_dir(self, file_path: Path) -> Path:
+        """Get or create backup directory for a file."""
+        backup_dir = file_path.parent / ".nanobot_backups" / file_path.name
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        return backup_dir
+
+    def _create_file_backup(self, file_path: Path) -> Path | None:
+        """Create a timestamped backup of the file before writing."""
+        if not file_path.exists():
+            return None
+        
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_file = self._get_backup_dir(file_path) / f"{timestamp}.bak"
+            
+            backup_file.write_bytes(file_path.read_bytes())
+            self._cleanup_old_file_backups(file_path)
+            
+            logger.debug("Created backup: {}", backup_file)
+            return backup_file
+        except Exception as e:
+            logger.warning("Failed to create file backup: {}", e)
+            return None
+
+    def _cleanup_old_file_backups(self, file_path: Path) -> None:
+        """Remove old backups beyond _MAX_FILE_BACKUPS limit."""
+        backup_dir = self._get_backup_dir(file_path)
+        backups = sorted(
+            backup_dir.glob("*.bak"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True
+        )
+        for old_backup in backups[self._MAX_FILE_BACKUPS:]:
+            try:
+                old_backup.unlink()
+            except Exception:
+                pass
+
+    def list_file_backups(self, file_path: str) -> list[dict]:
+        """List available backups for a file."""
+        fp = self._resolve(file_path)
+        backup_dir = self._get_backup_dir(fp)
+        
+        backups = []
+        for b in sorted(backup_dir.glob("*.bak"), key=lambda p: p.stat().st_mtime, reverse=True):
+            backups.append({
+                "path": str(b),
+                "created": datetime.fromtimestamp(b.stat().st_mtime).isoformat(),
+                "size": b.stat().st_size,
+            })
+        return backups
 
 
 # ---------------------------------------------------------------------------
@@ -172,17 +228,22 @@ class WriteFileTool(_FsTool):
             "properties": {
                 "path": {"type": "string", "description": "The file path to write to"},
                 "content": {"type": "string", "description": "The content to write"},
+                "create_backup": {"type": "boolean", "description": "Create a backup before writing (default: true)", "default": True},
             },
             "required": ["path", "content"],
         }
 
-    async def execute(self, path: str | None = None, content: str | None = None, **kwargs: Any) -> str:
+    async def execute(self, path: str | None = None, content: str | None = None, create_backup: bool = True, **kwargs: Any) -> str:
         try:
             if not path:
                 raise ValueError("Unknown path")
             if content is None:
                 raise ValueError("Unknown content")
             fp = self._resolve(path)
+            
+            if create_backup and fp.exists():
+                self._create_file_backup(fp)
+            
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
             return f"Successfully wrote {len(content)} bytes to {fp}"
@@ -408,3 +469,105 @@ class ListDirTool(_FsTool):
             return f"Error: {e}"
         except Exception as e:
             return f"Error listing directory: {e}"
+
+
+# ---------------------------------------------------------------------------
+# restore_file_backup
+# ---------------------------------------------------------------------------
+
+class RestoreFileBackupTool(_FsTool):
+    """Restore a file from a backup."""
+
+    @property
+    def name(self) -> str:
+        return "restore_file_backup"
+
+    @property
+    def description(self) -> str:
+        return "Restore a file from its most recent backup or a specific backup timestamp."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "The file path to restore"},
+                "timestamp": {"type": "string", "description": "Specific backup timestamp to restore (e.g., '20260330_123045'). If empty, restores most recent."},
+            },
+            "required": ["path"],
+        }
+
+    async def execute(self, path: str | None = None, timestamp: str | None = None, **kwargs: Any) -> str:
+        try:
+            if not path:
+                raise ValueError("Unknown path")
+            
+            fp = self._resolve(path)
+            backup_dir = self._get_backup_dir(fp)
+            
+            if not backup_dir.exists():
+                return f"Error: No backups found for {path}"
+            
+            if timestamp:
+                backup_file = backup_dir / f"{timestamp}.bak"
+                if not backup_file.exists():
+                    return f"Error: Backup not found: {timestamp}"
+            else:
+                backups = sorted(backup_dir.glob("*.bak"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if not backups:
+                    return f"Error: No backups found for {path}"
+                backup_file = backups[0]
+            
+            fp.write_bytes(backup_file.read_bytes())
+            return f"Restored {fp} from backup {backup_file.name}"
+        except PermissionError as e:
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error restoring backup: {e}"
+
+
+# ---------------------------------------------------------------------------
+# list_file_backups
+# ---------------------------------------------------------------------------
+
+class ListFileBackupsTool(_FsTool):
+    """List available backups for a file."""
+
+    @property
+    def name(self) -> str:
+        return "list_file_backups"
+
+    @property
+    def description(self) -> str:
+        return "List all available backups for a file."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "The file path to list backups for"},
+            },
+            "required": ["path"],
+        }
+
+    async def execute(self, path: str | None = None, **kwargs: Any) -> str:
+        try:
+            if not path:
+                raise ValueError("Unknown path")
+            
+            fp = self._resolve(path)
+            backups = self.list_file_backups(path)
+            
+            if not backups:
+                return f"No backups found for {path}"
+            
+            lines = [f"Backups for {path}:"]
+            for b in backups:
+                lines.append(f"  - {b['created']} ({b['size']} bytes)")
+            
+            return "\n".join(lines)
+        except PermissionError as e:
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error listing backups: {e}"

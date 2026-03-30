@@ -34,8 +34,9 @@ _SAVE_MEMORY_TOOL = [
                     },
                     "memory_update": {
                         "type": "string",
-                        "description": "Full updated long-term memory as markdown. Include all existing "
-                        "facts plus new ones. Return unchanged if nothing new.",
+                        "description": "Updated long-term memory. Use structured format: "
+                        "## Facts (keep brief, max 10 items)\\n- **key**: value\\n"
+                        "Only include changes, omit unchanged facts. Return unchanged if nothing important changed.",
                     },
                 },
                 "required": ["history_entry", "memory_update"],
@@ -43,6 +44,12 @@ _SAVE_MEMORY_TOOL = [
         },
     }
 ]
+
+_MEMORY_TEMPLATE = """## Facts
+{facts}
+
+## Important Context
+{context}"""
 
 
 def _ensure_text(value: Any) -> str:
@@ -76,6 +83,7 @@ class MemoryStore:
     """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
 
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
+    _MAX_BACKUPS = 5  # Keep up to 5 backups
 
     def __init__(self, workspace: Path):
         self.memory_dir = ensure_dir(workspace / "memory")
@@ -88,8 +96,94 @@ class MemoryStore:
             return self.memory_file.read_text(encoding="utf-8")
         return ""
 
+    def _create_backup(self) -> Path | None:
+        """Create a timestamped backup of MEMORY.md before writing."""
+        if not self.memory_file.exists():
+            return None
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_file = self.memory_dir / f"MEMORY.md.bak.{timestamp}"
+        
+        try:
+            self.memory_file.rename(backup_file)
+            self._cleanup_old_backups()
+            return backup_file
+        except Exception:
+            logger.warning("Failed to create memory backup")
+            return None
+
+    def _cleanup_old_backups(self) -> None:
+        """Remove old backups beyond _MAX_BACKUPS limit."""
+        backups = sorted(
+            self.memory_dir.glob("MEMORY.md.bak.*"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True
+        )
+        for old_backup in backups[self._MAX_BACKUPS:]:
+            try:
+                old_backup.unlink()
+            except Exception:
+                pass
+
     def write_long_term(self, content: str) -> None:
+        """Write long-term memory with automatic backup."""
+        current = self.read_long_term()
+        
+        if content != current:
+            self._create_backup()
+        
         self.memory_file.write_text(content, encoding="utf-8")
+
+    def update_memory_safely(self, new_memory: str) -> bool:
+        """Update memory with backup and basic validation.
+        
+        Returns True if update was applied, False if rejected.
+        """
+        current = self.read_long_term()
+        
+        if not self._validate_memory_update(current, new_memory):
+            logger.warning("Memory update validation failed - rejecting change")
+            return False
+        
+        self.write_long_term(new_memory)
+        return True
+
+    def _validate_memory_update(self, old: str, new: str) -> bool:
+        """Validate that memory update doesn't lose important content."""
+        if not old:
+            return True
+        
+        if new == old:
+            return True
+        
+        if len(new) < len(old) * 0.5:
+            logger.warning(
+                "Memory update shrinks content significantly (old: {} chars, new: {} chars)",
+                len(old), len(new)
+            )
+            return False
+        
+        return True
+
+    def merge_memory_update(self, update: str) -> bool:
+        """Merge new memory content with existing instead of full replacement.
+        
+        Appends new content under a dated section.
+        """
+        current = self.read_long_term()
+        
+        if update.strip() in (current or "").strip():
+            logger.debug("Memory update identical to existing - skipping")
+            return True
+        
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        if current:
+            merged = f"{current.rstrip()}\n\n---\n\n### {timestamp}\n\n{update.strip()}"
+        else:
+            merged = update.strip()
+        
+        return self.update_memory_safely(merged)
 
     def append_history(self, entry: str) -> None:
         with open(self.history_file, "a", encoding="utf-8") as f:
@@ -98,6 +192,42 @@ class MemoryStore:
     def get_memory_context(self) -> str:
         long_term = self.read_long_term()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
+
+    def get_memory_summary(self, max_facts: int = 10) -> str:
+        """Get a summary of memory facts, truncated to max_facts."""
+        memory = self.read_long_term()
+        if not memory:
+            return "No long-term memory stored."
+        
+        lines = memory.split("\n")
+        facts = []
+        for line in lines:
+            if line.strip().startswith("-") or line.strip().startswith("*"):
+                facts.append(line.strip())
+                if len(facts) >= max_facts:
+                    break
+        
+        if not facts:
+            return memory[:500] + "..." if len(memory) > 500 else memory
+        
+        return "## Key Facts\n" + "\n".join(facts)
+
+    def search_memory(self, query: str) -> list[str]:
+        """Search memory and history for query string."""
+        results = []
+        query_lower = query.lower()
+        
+        memory = self.read_long_term()
+        if memory and query_lower in memory.lower():
+            results.append(f"[MEMORY] {memory[:500]}")
+        
+        if self.history_file.exists():
+            history = self.history_file.read_text(encoding="utf-8")
+            for line in history.split("\n"):
+                if query_lower in line.lower():
+                    results.append(f"[HISTORY] {line[:200]}")
+        
+        return results[:10]
 
     @staticmethod
     def _format_messages(messages: list[dict]) -> str:
@@ -189,7 +319,9 @@ class MemoryStore:
             self.append_history(entry)
             update = _ensure_text(update)
             if update != current_memory:
-                self.write_long_term(update)
+                if not self.update_memory_safely(update):
+                    logger.warning("Memory consolidation: rejected unsafe memory update")
+                    return self._fail_or_raw_archive(messages)
 
             self._consecutive_failures = 0
             logger.info("Memory consolidation done for {} messages", len(messages))

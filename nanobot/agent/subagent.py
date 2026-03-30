@@ -11,7 +11,15 @@ logger.add("~/.nanobot/workspace/logs/{time}/subagent.log", rotation="1day")
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.filesystem import (
+    EditFileTool,
+    ListDirTool,
+    ListFileBackupsTool,
+    ReadFileTool,
+    RestoreFileBackupTool,
+    WriteFileTool,
+)
+from nanobot.agent.tools.memory import MemoryTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
@@ -100,6 +108,9 @@ class SubagentManager:
             tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            tools.register(ListFileBackupsTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            tools.register(RestoreFileBackupTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            tools.register(MemoryTool(workspace=self.workspace))
             tools.register(ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
