@@ -197,9 +197,10 @@ class TelegramChannel(BaseChannel):
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
         BotCommand("stop", "Stop the current task"),
-        BotCommand("help", "Show available commands"),
         BotCommand("restart", "Restart the bot"),
         BotCommand("status", "Show bot status"),
+        BotCommand("skills", "List available skills"),
+        BotCommand("help", "Show available commands"),
     ]
 
     @classmethod
@@ -282,6 +283,7 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("stop", self._forward_command))
         self._app.add_handler(CommandHandler("restart", self._forward_command))
         self._app.add_handler(CommandHandler("status", self._forward_command))
+        self._app.add_handler(CommandHandler("skills", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
 
         # Add message handler for text, photos, voice, documents
@@ -588,6 +590,8 @@ class TelegramChannel(BaseChannel):
             "/stop — Stop the current task\n"
             "/restart — Restart the bot\n"
             "/status — Show bot status\n"
+            "/skills — List available skills\n"
+            "$<name> — Activate a skill inline (e.g. $weather what's the forecast)\n"
             "/help — Show available commands"
         )
 
