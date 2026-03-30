@@ -56,10 +56,8 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     if ctx_est <= 0:
         ctx_est = loop._last_usage.get("prompt_tokens", 0)
     return OutboundMessage(
-        version=__version__,
-        model=loop.model,
-        start_time=loop._start_time,
-        last_usage=loop._last_usage,
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
         content=build_status_content(
             version=__version__, model=loop.model,
             start_time=loop._start_time, last_usage=loop._last_usage,
@@ -175,7 +173,6 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
-    router.exact("/status", cmd_status)
     router.exact("/help", cmd_help)
     router.exact("/skills", cmd_skill_list)
     router.intercept(intercept_skill_refs)
