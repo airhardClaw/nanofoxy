@@ -100,7 +100,7 @@ def get_uptime_seconds(start_time: float) -> float:
     return time.time() - start_time
 
 
-_DASHBOARD_HTML = """
+_DASHBOARD_HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -198,6 +198,8 @@ _DASHBOARD_HTML = """
         
         <nav class="nav">
             <a href="#" class="active" data-page="dashboard">Dashboard</a>
+            <a href="#" data-page="subagents">Subagents</a>
+            <a href="#" data-page="files">Files</a>
             <a href="#" data-page="sessions">Sessions</a>
             <a href="#" data-page="settings">Settings</a>
         </nav>
@@ -207,7 +209,7 @@ _DASHBOARD_HTML = """
         </div>
     </div>
     
-    <script type="module">
+    <script>
         const API_BASE = '/api';
         
         async function fetchStatus() {
@@ -222,6 +224,29 @@ _DASHBOARD_HTML = """
         
         async function fetchConfig() {
             const res = await fetch(`${API_BASE}/config`);
+            return res.json();
+        }
+        
+        async function fetchSubagents() {
+            const res = await fetch(`${API_BASE}/subagents`);
+            return res.json();
+        }
+        
+        async function fetchFiles(path = '') {
+            const res = await fetch(`${API_BASE}/files?path=${encodeURIComponent(path)}`);
+            return res.json();
+        }
+        
+        async function fetchFile(path) {
+            const res = await fetch(`${API_BASE}/files/${encodeURIComponent(path)}`);
+            return res.json();
+        }
+        
+        async function saveFile(path, content) {
+            const res = await fetch(`${API_BASE}/files/${encodeURIComponent(path)}`, {
+                method: 'PUT',
+                body: content
+            });
             return res.json();
         }
         
@@ -421,10 +446,137 @@ _DASHBOARD_HTML = """
                 } else if (page === 'settings') {
                     const config = await fetchConfig();
                     content.innerHTML = renderSettings(config);
+                } else if (page === 'subagents') {
+                    const subagents = await fetchSubagents();
+                    content.innerHTML = renderSubagents(subagents);
+                } else if (page === 'files') {
+                    const files = await fetchFiles('');
+                    content.innerHTML = renderFiles(files, '');
+                    
+                    // Add click handlers for file items
+                    document.querySelectorAll('.session-item[data-path]').forEach(item => {
+                        item.addEventListener('click', async () => {
+                            const path = item.dataset.path;
+                            const f = await fetchFile(path);
+                            content.innerHTML = renderFiles(f, path);
+                            
+                            // Add back button handler
+                            document.querySelectorAll('.session-item[data-path]').forEach(backItem => {
+                                backItem.addEventListener('click', async () => {
+                                    const backPath = backItem.dataset.path;
+                                    if (backPath === '') {
+                                        const rootFiles = await fetchFiles('');
+                                        content.innerHTML = renderFiles(rootFiles, '');
+                                    } else {
+                                        const backF = await fetchFile(backPath);
+                                        content.innerHTML = renderFiles(backF, backPath);
+                                    }
+                                });
+                            });
+                        });
+                    });
                 }
             } catch (e) {
                 content.innerHTML = `<div class="error">Failed to load: ${e.message}</div>`;
             }
+        }
+        
+        function renderSubagents(subagents) {
+            if (subagents.length === 0) {
+                return `
+                    <div class="card">
+                        <h2>Subagents</h2>
+                        <div class="stat-label" style="padding: 40px; text-align: center;">No subagents configured</div>
+                    </div>
+                `;
+            }
+            return `
+                <div class="card">
+                    <h2>Configured Subagents</h2>
+                    <div class="sessions-list">
+                        ${subagents.map(s => `
+                            <div class="session-item">
+                                <div class="session-key">${s.id}</div>
+                                <div class="session-time">
+                                    Role: ${s.role || 'N/A'} | 
+                                    Bot: @${s.bot_username || 'N/A'} | 
+                                    Enabled: ${s.enabled ? 'Yes' : 'No'}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderFiles(files, currentPath) {
+            if (files.error) {
+                return `<div class="error">${files.error}</div>`;
+            }
+            
+            if (files.type === 'file') {
+                return renderFileEditor(files);
+            }
+            
+            // Directory view
+            const items = files.items || [];
+            const regularItems = items.filter(i => !i.hidden);
+            const hiddenItems = items.filter(i => i.hidden);
+            
+            return `
+                <div class="card">
+                    <h2>Files: ${currentPath || '/'}</h2>
+                    <div class="sessions-list">
+                        ${currentPath ? `
+                            <div class="session-item" data-path="${files.path.split('/').slice(0, -1).join('/')}">
+                                <div class="session-key">📁 .. (Parent Directory)</div>
+                            </div>
+                        ` : ''}
+                        ${regularItems.filter(i => i.type === 'directory').map(i => `
+                            <div class="session-item" data-path="${i.path}">
+                                <div class="session-key">📁 ${i.name}</div>
+                            </div>
+                        `).join('')}
+                        ${regularItems.filter(i => i.type === 'file').map(i => `
+                            <div class="session-item" data-path="${i.path}">
+                                <div class="session-key">📄 ${i.name}</div>
+                            </div>
+                        `).join('')}
+                        ${hiddenItems.length > 0 ? `
+                            <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #334155;">
+                                <div style="color: #64748b; font-size: 0.75rem; margin-bottom: 8px;">CONFIG FILES</div>
+                                ${hiddenItems.map(i => `
+                                    <div class="session-item" data-path="${i.path}" style="background: #1e293b;">
+                                        <div class="session-key" style="color: #f59e0b;">⚙️ ${i.name}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderFileEditor(file) {
+            const escapedContent = file.content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return `
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <h2>Edit: ${file.name}</h2>
+                        <button id="saveBtn" style="background: #22c55e; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">Save</button>
+                    </div>
+                    <textarea id="editor" style="width: 100%; height: 60vh; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.875rem;">${escapedContent}</textarea>
+                    <input type="hidden" id="filePath" value="${file.path}">
+                </div>
+                <script>
+                    document.getElementById('saveBtn').addEventListener('click', async () => {
+                        const path = document.getElementById('filePath').value;
+                        const content = document.getElementById('editor').value;
+                        const result = await saveFile(path, content);
+                        alert(result.status === 'ok' ? 'Saved!' : 'Error: ' + result.message);
+                    });
+                </scr' + 'ipt>
+            `;
         }
         
         async function loadSession(key) {

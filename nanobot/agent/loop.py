@@ -409,6 +409,27 @@ class AgentLoop:
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
                                 else ("cli", msg.chat_id))
             logger.info("Processing system message from {}", msg.sender_id)
+            
+            # Check if this is a subagent result that needs routing
+            if msg.metadata.get("_subagent_result"):
+                subagent_role = msg.metadata.get("_subagent_role", "")
+                original_chat_id = msg.metadata.get("_original_chat_id", chat_id)
+                logger.info("Subagent result received: role={}, original_chat_id={}", subagent_role, original_chat_id)
+                
+                # Extract just the result from the content (skip the "Task:" and "Result:" labels)
+                result_content = msg.content
+                # Try to extract just the result part
+                if "Result:" in msg.content:
+                    result_content = msg.content.split("Result:")[1].strip()
+                
+                # Send result to the original chat via the correct bot
+                return OutboundMessage(
+                    channel="telegram",
+                    chat_id=original_chat_id,
+                    content=result_content,
+                    metadata={"_from_subagent": True, "_subagent_id": subagent_role},
+                )
+            
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
@@ -435,6 +456,32 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
+
+        # Check if this is a subagent request (from Telegram routing)
+        subagent_id = msg.metadata.get("_subagent_id")
+        if subagent_id:
+            subagent_role = msg.metadata.get("_subagent_role", "")
+            subagent_task = msg.metadata.get("_subagent_task", msg.content)
+            
+            logger.info("Routing to subagent {} with role {}", subagent_id, subagent_role)
+            
+            # Spawn the subagent with role
+            result = await self.subagents.spawn_with_role(
+                task=subagent_task,
+                role=subagent_role,
+                subagent_id=subagent_id,
+                origin_channel=msg.channel,
+                origin_chat_id=msg.chat_id,
+                session_key=key,
+            )
+            
+            # Return response that subagent will complete later
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"[{subagent_id}]: {result}",
+                metadata=msg.metadata,
+            )
 
         # Slash commands
         raw = msg.content.strip()

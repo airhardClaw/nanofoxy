@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
@@ -48,6 +49,9 @@ class HeartbeatService:
     Phase 2 (execution): only triggered when Phase 1 returns ``run``.  The
     ``on_execute`` callback runs the task through the full agent loop and
     returns the result to deliver.
+    
+    Subagent Heartbeats: Optional per-subagent heartbeat tasks that run
+    in parallel to the main heartbeat.
     """
 
     def __init__(
@@ -60,6 +64,7 @@ class HeartbeatService:
         interval_s: int = 30 * 60,
         enabled: bool = True,
         timezone: str | None = None,
+        subagent_callbacks: dict[str, Callable[[str], Coroutine[Any, Any, str]]] | None = None,
     ):
         self.workspace = workspace
         self.provider = provider
@@ -69,8 +74,12 @@ class HeartbeatService:
         self.interval_s = interval_s
         self.enabled = enabled
         self.timezone = timezone
+        self.subagent_callbacks = subagent_callbacks or {}
         self._running = False
         self._task: asyncio.Task | None = None
+        self._subagent_tasks: dict[str, asyncio.Task] = {}
+        self._subagent_intervals: dict[str, int] = {}
+        self._subagent_last_run: dict[str, float] = {}
 
     @property
     def heartbeat_file(self) -> Path:
@@ -137,6 +146,9 @@ class HeartbeatService:
                 await asyncio.sleep(self.interval_s)
                 if self._running:
                     await self._tick()
+                    # Also run subagent heartbeats
+                    if self.subagent_callbacks:
+                        await self._run_subagent_heartbeats()
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -185,3 +197,80 @@ class HeartbeatService:
         if action != "run" or not self.on_execute:
             return None
         return await self.on_execute(tasks)
+
+    def load_subagent_configs(self) -> dict[str, dict]:
+        """Load subagent configurations from .subagents directory."""
+        subagent_dir = self.workspace / ".subagents"
+        configs = {}
+        
+        if not subagent_dir.exists():
+            return configs
+        
+        # Load main config
+        config_file = subagent_dir / "config.json"
+        if config_file.exists():
+            try:
+                main_config = json.loads(config_file.read_text(encoding="utf-8"))
+                group_chat = main_config.get("group_chat", "")
+            except json.JSONDecodeError:
+                group_chat = ""
+        else:
+            group_chat = ""
+        
+        # Load individual subagent configs
+        for config_file in subagent_dir.glob("*.json"):
+            if config_file.name == "config.json":
+                continue
+            try:
+                subagent_config = json.loads(config_file.read_text(encoding="utf-8"))
+                subagent_id = config_file.stem
+                
+                # Check if subagent has heartbeat enabled
+                heartbeat_config = subagent_config.get("heartbeat", {})
+                if heartbeat_config.get("enabled", False):
+                    configs[subagent_id] = {
+                        "role": subagent_config.get("role", subagent_id),
+                        "task": heartbeat_config.get("task", ""),
+                        "interval_s": heartbeat_config.get("interval_s", 1800),
+                        "allowed_chats": subagent_config.get("allowed_chats", [group_chat]),
+                    }
+            except json.JSONDecodeError:
+                continue
+        
+        return configs
+
+    def register_subagent_callback(self, subagent_id: str, callback: Callable[[str], Coroutine[Any, Any, str]]) -> None:
+        """Register a callback function for a subagent's heartbeat."""
+        self.subagent_callbacks[subagent_id] = callback
+
+    async def trigger_subagent_heartbeat(self, subagent_id: str, task: str) -> str | None:
+        """Trigger a specific subagent's heartbeat task."""
+        callback = self.subagent_callbacks.get(subagent_id)
+        if callback:
+            return await callback(task)
+        return None
+
+    async def _run_subagent_heartbeats(self) -> None:
+        """Run all enabled subagent heartbeats based on their intervals."""
+        import time
+        current_time = time.time()
+        
+        configs = self.load_subagent_configs()
+        
+        for subagent_id, config in configs.items():
+            interval = config.get("interval_s", 1800)
+            last_run = self._subagent_last_run.get(subagent_id, 0)
+            
+            # Check if enough time has passed
+            if current_time - last_run >= interval:
+                logger.info("Subagent heartbeat [{}]: checking tasks...", subagent_id)
+                self._subagent_last_run[subagent_id] = current_time
+                
+                task = config.get("task", "")
+                if task and subagent_id in self.subagent_callbacks:
+                    try:
+                        response = await self.trigger_subagent_heartbeat(subagent_id, task)
+                        if response:
+                            logger.info("Subagent [{}] heartbeat completed", subagent_id)
+                    except Exception:
+                        logger.exception("Subagent [{}] heartbeat failed", subagent_id)

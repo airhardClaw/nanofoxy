@@ -294,6 +294,70 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
     _write(None, workspace / "memory" / "HISTORY.md")
     (workspace / "skills").mkdir(exist_ok=True)
+    
+    # Sync roles
+    try:
+        roles_src = pkg_files("nanobot") / "roles"
+        roles_tpl = tpl / "roles"
+        
+        # First copy from package if exists
+        if roles_src.is_dir():
+            (workspace / "roles").mkdir(parents=True, exist_ok=True)
+            for role_file in roles_src.iterdir():
+                if role_file.suffix == ".md" and role_file.stem not in ("SKILL",):
+                    dest = workspace / "roles" / role_file.name
+                    if not dest.exists():
+                        dest.write_text(role_file.read_text(encoding="utf-8"), encoding="utf-8")
+                        added.append(f"roles/{role_file.name}")
+        # Then copy from templates
+        elif roles_tpl.is_dir():
+            (workspace / "roles").mkdir(parents=True, exist_ok=True)
+            for role_file in roles_tpl.iterdir():
+                if role_file.suffix == ".md" and role_file.stem not in ("SKILL",):
+                    dest = workspace / "roles" / role_file.name
+                    if not dest.exists():
+                        dest.write_text(role_file.read_text(encoding="utf-8"), encoding="utf-8")
+                        added.append(f"roles/{role_file.name}")
+    except Exception:
+        pass
+    
+    # Sync subagents config directory
+    subagent_dir = workspace / ".subagents"
+    if not subagent_dir.exists():
+        subagent_dir.mkdir(parents=True, exist_ok=True)
+        config_template = subagent_dir / "config.json"
+        if not config_template.exists():
+            import json
+            config_template.write_text(json.dumps({
+                "group_chat": "",
+                "subagents": {}
+            }, indent=2), encoding="utf-8")
+            added.append(".subagents/config.json")
+        
+        # Copy subagent config templates
+        try:
+            subagent_templates = tpl / ".subagents"
+            if subagent_templates.is_dir():
+                for template_file in subagent_templates.iterdir():
+                    if template_file.suffix == ".json":
+                        dest = subagent_dir / template_file.name
+                        if not dest.exists():
+                            dest.write_text(template_file.read_text(encoding="utf-8"), encoding="utf-8")
+                            added.append(f".subagents/{template_file.name}")
+        except Exception:
+            pass
+    
+    # Sync subagent memory directories
+    subagent_memory_dir = workspace / "memory" / "subagents"
+    subagent_names = ["coding_expert", "websearch_expert", "file_handel_expert", "information_expert"]
+    for name in subagent_names:
+        mem_dir = subagent_memory_dir / name
+        if not mem_dir.exists():
+            mem_dir.mkdir(parents=True, exist_ok=True)
+            readme = mem_dir / "README.md"
+            if not readme.exists():
+                readme.write_text(f"# {name}\n\nSubagent-spezifische Notes und Kontext.\n", encoding="utf-8")
+                added.append(f"memory/subagents/{name}/README.md")
 
     if added and not silent:
         from rich.console import Console

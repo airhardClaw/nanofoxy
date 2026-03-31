@@ -1,12 +1,12 @@
 [project]
 name = "nanofoxy-ai"
-version = "0.1.4.post6"
+version = "0.1.5"
 description = "A lightweight personal AI assistant framework"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "nanobot contributors"}
+    {name = "nanofoxy & Sir Airhard"}
 ]
 keywords = ["ai", "agent", "chatbot"]
 classifiers = [

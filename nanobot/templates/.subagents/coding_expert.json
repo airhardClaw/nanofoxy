@@ -1,0 +1,17 @@
+{
+  "role": "coding-expert",
+  "model": "qwen2.5-7b-instruct",
+  "enabled": true,
+  "bot_token": "MANUELL_EINTRAGEN",
+  "bot_username": "MANUELL_EINTRAGEN",
+  "allowed_chats": [],
+  "allow_from": [],
+  "respond_to_mentions": true,
+  "heartbeat": {
+    "enabled": false,
+    "task": "Check pending code reviews",
+    "interval_s": 1800
+  },
+  "memory_dir": "memory/subagents/coding_expert",
+  "max_iterations": 15
+}

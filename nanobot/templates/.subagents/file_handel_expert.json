@@ -1,0 +1,17 @@
+{
+  "role": "file-handel-expert",
+  "model": "qwen2.5-7b-instruct",
+  "enabled": true,
+  "bot_token": "MANUELL_EINTRAGEN",
+  "bot_username": "MANUELL_EINTRAGEN",
+  "allowed_chats": [],
+  "allow_from": [],
+  "respond_to_mentions": true,
+  "heartbeat": {
+    "enabled": false,
+    "task": "Check for file operations",
+    "interval_s": 1800
+  },
+  "memory_dir": "memory/subagents/file_handel_expert",
+  "max_iterations": 15
+}

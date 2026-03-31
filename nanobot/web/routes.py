@@ -389,3 +389,119 @@ async def get_my_tasks(request: Request) -> dict[str, Any]:
 # Register paperclip router in main app
 def register_paperclip_routes(app):
     app.include_router(paperclip_router)
+
+
+# ============================================================================
+# Subagents Routes
+# ============================================================================
+
+@router.get("/subagents")
+async def list_subagents(request: Request) -> list[dict[str, Any]]:
+    """List all configured subagents."""
+    workspace = request.app.state.config.workspace_path if request.app.state.config else None
+    if not workspace:
+        return []
+    
+    import json
+    subagent_dir = workspace / ".subagents"
+    if not subagent_dir.exists():
+        return []
+    
+    subagents = []
+    for config_file in subagent_dir.glob("*.json"):
+        if config_file.name == "config.json":
+            continue
+        try:
+            cfg = json.loads(config_file.read_text(encoding="utf-8"))
+            subagents.append({
+                "id": config_file.stem,
+                "role": cfg.get("role", ""),
+                "enabled": cfg.get("enabled", False),
+                "bot_username": cfg.get("bot_username", ""),
+                "model": cfg.get("model", ""),
+                "heartbeat_enabled": cfg.get("heartbeat", {}).get("enabled", False),
+                "heartbeat_task": cfg.get("heartbeat", {}).get("task", ""),
+            })
+        except Exception:
+            pass
+    
+    return subagents
+
+
+# ============================================================================
+# File Browser Routes
+# ============================================================================
+
+@router.get("/files")
+async def list_files(request: Request, path: str = "") -> dict[str, Any]:
+    """List files in workspace."""
+    workspace = request.app.state.config.workspace_path if request.app.state.config else None
+    if not workspace:
+        return {"error": "No workspace"}
+    
+    target_path = (workspace / path) if path else workspace
+    
+    if not target_path.exists():
+        return {"error": "Path not found"}
+    
+    if target_path.is_file():
+        # Return file content
+        content = target_path.read_text(encoding="utf-8")
+        return {
+            "type": "file",
+            "name": target_path.name,
+            "path": str(target_path.relative_to(workspace)),
+            "content": content,
+        }
+    
+    # Return directory contents
+    items = []
+    for item in sorted(target_path.iterdir()):
+        # Include all files including hidden ones
+        items.append({
+            "name": item.name,
+            "type": "directory" if item.is_dir() else "file",
+            "path": str(item.relative_to(workspace)),
+            "hidden": item.name.startswith("."),
+        })
+    
+    return {"type": "directory", "items": items}
+
+
+@router.get("/files/{file_path:path}")
+async def read_file(request: Request, file_path: str) -> dict[str, Any]:
+    """Read a specific file."""
+    workspace = request.app.state.config.workspace_path if request.app.state.config else None
+    if not workspace:
+        return {"error": "No workspace"}
+    
+    target_path = workspace / file_path
+    if not target_path.exists() or not target_path.is_file():
+        return {"error": "File not found"}
+    
+    content = target_path.read_text(encoding="utf-8")
+    return {
+        "name": target_path.name,
+        "path": file_path,
+        "content": content,
+    }
+
+
+@router.put("/files/{file_path:path}")
+async def save_file(request: Request, file_path: str) -> dict[str, str]:
+    """Save a file."""
+    workspace = request.app.state.config.workspace_path if request.app.state.config else None
+    if not workspace:
+        return {"status": "error", "message": "No workspace"}
+    
+    target_path = workspace / file_path
+    if not target_path.exists():
+        return {"status": "error", "message": "File not found"}
+    
+    try:
+        body = await request.body()
+        content = body.decode("utf-8")
+        target_path.write_text(content, encoding="utf-8")
+        return {"status": "ok", "message": "File saved"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

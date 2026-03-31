@@ -6,7 +6,6 @@ import asyncio
 from typing import Any
 
 from loguru import logger
-logger.add("~/.nanobot/workspace/logs/{time}/channel-manager.log", rotation="1day")
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -52,7 +51,11 @@ class ChannelManager:
             if not enabled:
                 continue
             try:
-                channel = cls(section, self.bus)
+                # Pass workspace path to Telegram channel
+                if name == "telegram":
+                    channel = cls(section, self.bus, workspace=str(self.config.workspace_path))
+                else:
+                    channel = cls(section, self.bus)
                 channel.transcription_api_key = groq_key
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)

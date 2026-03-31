@@ -1,0 +1,18 @@
+2026-03-31 20:29:16.707 | INFO     | nanobot.channels.manager:_init_channels:61 - Telegram channel enabled
+2026-03-31 20:29:16.710 | INFO     | nanobot.cron.service:_load_store:85 - Cron: jobs.json modified externally, reloading
+2026-03-31 20:29:16.712 | INFO     | nanobot.cron.service:start:202 - Cron service started with 5 jobs
+2026-03-31 20:29:16.713 | INFO     | nanobot.heartbeat.service:start:133 - Heartbeat started (every 1800s)
+2026-03-31 20:29:16.713 | INFO     | nanobot.agent.loop:run:289 - Agent loop started
+2026-03-31 20:29:16.713 | INFO     | nanobot.channels.manager:start_all:94 - Starting telegram channel...
+2026-03-31 20:29:16.714 | INFO     | nanobot.channels.manager:_dispatch_outbound:122 - Outbound dispatcher started
+2026-03-31 20:29:17.067 | INFO     | nanobot.channels.telegram:_start_subagent_bot:457 - Subagent bot coding_expert polling started
+2026-03-31 20:29:17.067 | INFO     | nanobot.channels.telegram:_init_subagent_bots:396 - Subagent bot coding_expert started
+2026-03-31 20:29:17.296 | INFO     | nanobot.channels.telegram:_start_subagent_bot:457 - Subagent bot websearch_expert polling started
+2026-03-31 20:29:17.296 | INFO     | nanobot.channels.telegram:_init_subagent_bots:396 - Subagent bot websearch_expert started
+2026-03-31 20:29:17.557 | INFO     | nanobot.channels.telegram:_start_subagent_bot:457 - Subagent bot file_handel_expert polling started
+2026-03-31 20:29:17.557 | INFO     | nanobot.channels.telegram:_init_subagent_bots:396 - Subagent bot file_handel_expert started
+2026-03-31 20:29:17.795 | INFO     | nanobot.channels.telegram:_start_subagent_bot:457 - Subagent bot information_expert polling started
+2026-03-31 20:29:17.795 | INFO     | nanobot.channels.telegram:_init_subagent_bots:396 - Subagent bot information_expert started
+2026-03-31 20:29:17.796 | INFO     | nanobot.channels.telegram:start:309 - Starting Telegram bot (polling mode)...
+2026-03-31 20:29:17.978 | INFO     | nanobot.channels.telegram:start:319 - Telegram bot @NanoFoxyBot connected
+2026-03-31 20:29:18.053 | DEBUG    | nanobot.channels.telegram:start:323 - Telegram bot commands registered

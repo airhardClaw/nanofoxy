@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 import unicodedata
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 from loguru import logger
 logger.add("~/.nanobot/workspace/logs/{time}/telegram.log", rotation="1day")
 from pydantic import Field
-from telegram import BotCommand, ReactionTypeEmoji, ReplyParameters, Update
+from telegram import Bot, BotCommand, ReactionTypeEmoji, ReplyParameters, Update
 from telegram.error import BadRequest, TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
@@ -187,6 +189,9 @@ class TelegramChannel(BaseChannel):
     Telegram channel using long polling.
 
     Simple and reliable - no webhook/public IP needed.
+    
+    Supports subagent mentions via @subagent_name.
+    Subagent configs are loaded from workspace/.subagents/
     """
 
     name = "telegram"
@@ -209,11 +214,12 @@ class TelegramChannel(BaseChannel):
 
     _STREAM_EDIT_INTERVAL = 0.6  # min seconds between edit_message_text calls
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(self, config: Any, bus: MessageBus, workspace: str | None = None):
         if isinstance(config, dict):
             config = TelegramConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: TelegramConfig = config
+        self.workspace = Path(workspace) if workspace else None
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -223,6 +229,8 @@ class TelegramChannel(BaseChannel):
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
         self._stream_bufs: dict[str, _StreamBuf] = {}  # chat_id -> streaming state
+        self._subagent_configs: dict[str, dict] = {}
+        self._subagent_apps: dict[str, "Application"] = {}  # subagent_id -> Application (for polling)
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -276,6 +284,9 @@ class TelegramChannel(BaseChannel):
         )
         self._app = builder.build()
         self._app.add_error_handler(self._on_error)
+
+        # Load subagent configurations and initialize subagent bots
+        await self._init_subagent_bots()
 
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
@@ -343,6 +354,322 @@ class TelegramChannel(BaseChannel):
             await self._app.shutdown()
             self._app = None
 
+        # Stop all subagent bots
+        for subagent_id in list(self._subagent_apps.keys()):
+            await self._stop_subagent_bot(subagent_id)
+    
+    async def _init_subagent_bots(self) -> None:
+        """Initialize subagent bots from workspace/.subagents/ config."""
+        if not self.workspace:
+            return
+        
+        import json
+        subagent_dir = self.workspace / ".subagents"
+        
+        if not subagent_dir.exists():
+            return
+        
+        # Load main config
+        config_file = subagent_dir / "config.json"
+        group_chat = ""
+        if config_file.exists():
+            try:
+                main_config = json.loads(config_file.read_text(encoding="utf-8"))
+                group_chat = main_config.get("group_chat", "")
+            except json.JSONDecodeError:
+                pass
+        
+        # Load individual subagent configs and START EACH BOT
+        for config_file in subagent_dir.glob("*.json"):
+            if config_file.name == "config.json" or config_file.name.startswith("_"):
+                continue
+            try:
+                subagent_config = json.loads(config_file.read_text(encoding="utf-8"))
+                subagent_id = config_file.stem
+                
+                # Check if subagent is enabled and has a bot token
+                if subagent_config.get("enabled", True) and subagent_config.get("bot_token"):
+                    bot_token = subagent_config["bot_token"]
+                    if bot_token and bot_token != "MANUELL_EINTRAGEN":
+                        # Start the subagent bot with its own polling loop
+                        await self._start_subagent_bot(subagent_id, bot_token, subagent_config, group_chat)
+                        logger.info("Subagent bot {} started", subagent_id)
+            except json.JSONDecodeError as e:
+                logger.warning("Failed to parse subagent config {}: {}", config_file.name, e)
+    
+    async def _start_subagent_bot(
+        self, 
+        subagent_id: str, 
+        bot_token: str, 
+        subagent_config: dict,
+        group_chat: str
+    ) -> None:
+        """Create and start a subagent bot with its own polling loop."""
+        from telegram import Bot
+        from telegram.ext import Application, CommandHandler, MessageHandler, filters
+        
+        proxy = self.config.proxy or None
+        
+        # Create HTTP request with proxy support
+        request = HTTPXRequest(
+            connection_pool_size=4,
+            pool_timeout=5.0,
+            connect_timeout=10.0,
+            read_timeout=30.0,
+            proxy=proxy,
+        )
+        
+        # Create the Application (like main bot)
+        app = (
+            Application.builder()
+            .token(bot_token)
+            .request(request)
+            .build()
+        )
+        
+        # Add message handler for this subagent
+        app.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            lambda u, c: self._subagent_on_message(u, c, subagent_id)
+        ))
+        
+        # Add command handlers for this subagent
+        app.add_handler(CommandHandler("start", lambda u, c: self._subagent_on_command(u, c, subagent_id, "start")))
+        app.add_handler(CommandHandler("help", lambda u, c: self._subagent_on_command(u, c, subagent_id, "help")))
+        app.add_handler(CommandHandler("new", lambda u, c: self._subagent_on_command(u, c, subagent_id, "new")))
+        app.add_handler(CommandHandler("stop", lambda u, c: self._subagent_on_command(u, c, subagent_id, "stop")))
+        app.add_handler(CommandHandler("restart", lambda u, c: self._subagent_on_command(u, c, subagent_id, "restart")))
+        app.add_handler(CommandHandler("status", lambda u, c: self._subagent_on_command(u, c, subagent_id, "status")))
+        app.add_handler(CommandHandler("skills", lambda u, c: self._subagent_on_command(u, c, subagent_id, "skills")))
+        
+        # Store the app for this subagent
+        self._subagent_apps[subagent_id] = app
+        
+        # Store config
+        self._subagent_configs[subagent_id] = {
+            **subagent_config,
+            "group_chat": group_chat,
+        }
+        
+        # Start polling for this subagent
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling(
+            allowed_updates=["message"],
+            drop_pending_updates=True
+        )
+        
+        # Create Bot instance for this subagent to register commands
+        subagent_bot = Bot(token=bot_token, request=request)
+        
+        # Register bot commands for this subagent
+        try:
+            await subagent_bot.set_my_commands(self.BOT_COMMANDS)
+            logger.info("Subagent bot {} commands registered", subagent_id)
+        except Exception as e:
+            logger.warning("Failed to register commands for subagent {}: {}", subagent_id, e)
+        
+        logger.info("Subagent bot {} polling started", subagent_id)
+    
+    async def _subagent_on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE, subagent_id: str) -> None:
+        """Handle incoming message for a subagent bot."""
+        if not update.message or not update.effective_user:
+            return
+        
+        message = update.message
+        user = update.effective_user
+        chat_id = str(message.chat_id)
+        sender_id = self._sender_id(user)
+        
+        # Get subagent config
+        subagent_config = self._subagent_configs.get(subagent_id, {})
+        allowed_chats = subagent_config.get("allowed_chats", [])
+        allowed_from = subagent_config.get("allow_from", [])
+        
+        # Check if sender is allowed
+        sender_id_clean = sender_id.split("|")[0] if "|" in sender_id else sender_id
+        
+        # Check chat permission
+        if allowed_chats and chat_id not in allowed_chats:
+            logger.debug("Subagent {}: chat {} not allowed", subagent_id, chat_id)
+            return
+        
+        # Check sender permission
+        if allowed_from and sender_id_clean not in allowed_from:
+            logger.debug("Subagent {}: sender {} not allowed", subagent_id, sender_id_clean)
+            return
+        
+        # Get task content (everything after the bot mention)
+        task = message.text or ""
+        
+        # Route to subagent via message bus
+        metadata = {
+            "_subagent_id": subagent_id,
+            "_subagent_role": subagent_config.get("role", ""),
+            "_subagent_task": task,
+            "message_id": message.message_id,
+        }
+        
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=chat_id,
+            content=f"[Subagent: {subagent_id}]\n{task}",
+            metadata=metadata,
+        )
+        
+        # Start typing indicator
+        self._start_typing(chat_id)
+    
+    async def _subagent_on_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE, subagent_id: str, command: str) -> None:
+        """Handle command for a subagent bot."""
+        if not update.message or not update.effective_user:
+            return
+        
+        message = update.message
+        user = update.effective_user
+        chat_id = str(message.chat_id)
+        sender_id = self._sender_id(user)
+        
+        subagent_config = self._subagent_configs.get(subagent_id, {})
+        allowed_from = subagent_config.get("allow_from", [])
+        
+        sender_id_clean = sender_id.split("|")[0] if "|" in sender_id else sender_id
+        
+        # Check sender permission
+        if allowed_from and sender_id_clean not in allowed_from:
+            return
+        
+        task = f"/{command}"
+        metadata = {
+            "_subagent_id": subagent_id,
+            "_subagent_role": subagent_config.get("role", ""),
+            "_subagent_task": task,
+            "message_id": message.message_id,
+        }
+        
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=chat_id,
+            content=f"[Subagent: {subagent_id}]\n{task}",
+            metadata=metadata,
+        )
+        
+        self._start_typing(chat_id)
+    
+    async def _stop_subagent_bot(self, subagent_id: str) -> None:
+        """Stop a subagent bot."""
+        if subagent_id in self._subagent_apps:
+            app = self._subagent_apps[subagent_id]
+            try:
+                await app.updater.stop()
+                await app.stop()
+                await app.shutdown()
+            except Exception as e:
+                logger.warning("Error stopping subagent bot {}: {}", subagent_id, e)
+            del self._subagent_apps[subagent_id]
+        
+        if subagent_id in self._subagent_configs:
+            del self._subagent_configs[subagent_id]
+        
+        logger.info("Subagent bot {} stopped", subagent_id)
+    
+    def _extract_subagent_mention(self, text: str) -> str | None:
+        """Extract @subagent_name from message text.
+        
+        Handles:
+        - Regular mentions: "@coding_expert help me"
+        - Bot username: "@XRP4uBot help me" (bot_username from config)
+        - Bot commands: "/help@coding_expert" or "/help@XRP4uBot"
+        
+        Returns subagent_id if found, None otherwise.
+        """
+        match = re.search(r'@(\w+)', text)
+        if not match:
+            return None
+        
+        username = match.group(1).lower()
+        
+        # Check if it matches a known subagent
+        for subagent_id, config in self._subagent_configs.items():
+            # 1. Compare with subagent_id (with/without underscores)
+            if (subagent_id.lower().replace("_", "") == username.replace("_", "") or
+                subagent_id.lower() == username):
+                return subagent_id
+            
+            # 2. Compare with bot_username (e.g., "XRP4uBot")
+            bot_username = (config.get("bot_username") or "").lower().replace("@", "")
+            if bot_username and bot_username == username:
+                return subagent_id
+        
+        return None
+    
+    async def _route_to_subagent(
+        self, 
+        subagent_id: str, 
+        message_text: str,
+        chat_id: str,
+        sender_id: str,
+        metadata: dict,
+    ) -> bool:
+        """Route a message to a specific subagent.
+        
+        Returns True if message was routed to subagent, False otherwise.
+        """
+        if subagent_id not in self._subagent_configs:
+            return False
+        
+        subagent_config = self._subagent_configs[subagent_id]
+        
+        # Check if sender is allowed
+        allowed_from = subagent_config.get("allow_from", [])
+        allowed_chats = subagent_config.get("allowed_chats", [])
+        
+        # Check chat permission
+        if allowed_chats and chat_id not in allowed_chats:
+            logger.warning("Subagent {}: chat {} not allowed", subagent_id, chat_id)
+            return False
+        
+        # Check sender permission (if allow_from is set)
+        if allowed_from:
+            # Parse sender_id (format: "id|username" or just "id")
+            sender_id_clean = sender_id.split("|")[0] if "|" in sender_id else sender_id
+            if sender_id_clean not in allowed_from:
+                logger.warning("Subagent {}: sender {} not allowed", subagent_id, sender_id)
+                return False
+        
+        # Check if subagent responds to mentions
+        if not subagent_config.get("respond_to_mentions", True):
+            return False
+        
+        # Extract the task from the message (remove @subagent_name)
+        import re
+        task = re.sub(r'@\w+\s*', '', message_text, count=1).strip()
+        
+        if not task:
+            # Just mention without task - send help info
+            task = "Zeige deine Fähigkeiten und Rolle"
+        
+        # Route to chief agent with subagent context
+        logger.info("Routing message to subagent {} in chat {}", subagent_id, chat_id)
+        
+        # Build metadata with subagent info
+        subagent_metadata = {
+            **metadata,
+            "_subagent_id": subagent_id,
+            "_subagent_role": subagent_config.get("role", ""),
+            "_subagent_task": task,
+        }
+        
+        # Forward to message bus
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=chat_id,
+            content=f"[Subagent: {subagent_id}]\n{task}",
+            metadata=subagent_metadata,
+        )
+        
+        return True
+
     @staticmethod
     def _get_media_type(path: str) -> str:
         """Guess media type from file extension."""
@@ -361,6 +688,30 @@ class TelegramChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
+        logger.debug("TelegramChannel.send() called: chat_id={}, from_subagent={}, subagent_id={}", 
+            msg.chat_id, msg.metadata.get("_from_subagent"), msg.metadata.get("_subagent_id"))
+        
+        # Determine which bot to use: subagent or chief
+        bot = self._app.bot  # Default: chief bot
+        
+        # Check if this is a subagent response
+        if msg.metadata.get("_from_subagent"):
+            # Get subagent role (e.g., "information-expert")
+            subagent_role = msg.metadata.get("_subagent_id", "")
+            if not subagent_role:
+                subagent_role = msg.metadata.get("_subagent_label", "").replace(" ", "-").lower()
+            
+            logger.debug("Looking for subagent with role: {}", subagent_role)
+            
+            # Try to find subagent by matching role in configs
+            for sa_id, sa_config in self._subagent_configs.items():
+                config_role = sa_config.get("role", "").replace(" ", "-").lower()
+                if config_role == subagent_role:
+                    if sa_id in self._subagent_apps:
+                        bot = self._subagent_apps[sa_id].bot
+                        logger.info("Sending response via subagent bot: {} (role={})", sa_id, config_role)
+                        break
+        
         if not self._app:
             logger.warning("Telegram bot not running")
             return
@@ -395,10 +746,10 @@ class TelegramChannel(BaseChannel):
             try:
                 media_type = self._get_media_type(media_path)
                 sender = {
-                    "photo": self._app.bot.send_photo,
-                    "voice": self._app.bot.send_voice,
-                    "audio": self._app.bot.send_audio,
-                }.get(media_type, self._app.bot.send_document)
+                    "photo": bot.send_photo,
+                    "voice": bot.send_voice,
+                    "audio": bot.send_audio,
+                }.get(media_type, bot.send_document)
                 param = "photo" if media_type == "photo" else media_type if media_type in ("voice", "audio") else "document"
 
                 # Telegram Bot API accepts HTTP(S) URLs directly for media params.
@@ -435,35 +786,34 @@ class TelegramChannel(BaseChannel):
         # Send text content
         if msg.content and msg.content != "[empty message]":
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
-
-    async def _call_with_retry(self, fn, *args, **kwargs):
-        """Call an async Telegram API function with retry on pool/network timeout."""
-        for attempt in range(1, _SEND_MAX_RETRIES + 1):
-            try:
-                return await fn(*args, **kwargs)
-            except TimedOut:
-                if attempt == _SEND_MAX_RETRIES:
-                    raise
-                delay = _SEND_RETRY_BASE_DELAY * (2 ** (attempt - 1))
-                logger.warning(
-                    "Telegram timeout (attempt {}/{}), retrying in {:.1f}s",
-                    attempt, _SEND_MAX_RETRIES, delay,
-                )
-                await asyncio.sleep(delay)
+                await self._send_text(bot, chat_id, chunk, reply_params, thread_kwargs)
 
     async def _send_text(
         self,
+        bot,
         chat_id: int,
         text: str,
         reply_params=None,
         thread_kwargs: dict | None = None,
     ) -> None:
         """Send a plain text message with HTML fallback."""
+        
+        async def send_with_retry(send_fn, **kwargs):
+            """Simple retry loop for sending messages."""
+            for attempt in range(1, _SEND_MAX_RETRIES + 1):
+                try:
+                    return await send_fn(**kwargs)
+                except TimedOut:
+                    if attempt == _SEND_MAX_RETRIES:
+                        raise
+                    delay = _SEND_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                    logger.warning("Telegram timeout (attempt {}/{}), retrying in {:.1f}s", attempt, _SEND_MAX_RETRIES, delay)
+                    await asyncio.sleep(delay)
+        
         try:
             html = _markdown_to_telegram_html(text)
-            await self._call_with_retry(
-                self._app.bot.send_message,
+            await send_with_retry(
+                bot.send_message,
                 chat_id=chat_id, text=html, parse_mode="HTML",
                 reply_parameters=reply_params,
                 **(thread_kwargs or {}),
@@ -471,8 +821,8 @@ class TelegramChannel(BaseChannel):
         except Exception as e:
             logger.warning("HTML parse failed, falling back to plain text: {}", e)
             try:
-                await self._call_with_retry(
-                    self._app.bot.send_message,
+                await send_with_retry(
+                    bot.send_message,
                     chat_id=chat_id,
                     text=text,
                     reply_parameters=reply_params,
@@ -770,6 +1120,23 @@ class TelegramChannel(BaseChannel):
         message = update.message
         user = update.effective_user
         self._remember_thread_context(message)
+        
+        # Check if this command is directed at a subagent (e.g., /start@coding_expert)
+        command_text = message.text or ""
+        subagent_id = self._extract_subagent_mention(command_text)
+        
+        if subagent_id:
+            # Route to subagent
+            if await self._route_to_subagent(
+                subagent_id, 
+                command_text.replace(f"@{self._get_subagent_username(subagent_id)}", "").strip(),
+                str(message.chat_id),
+                self._sender_id(user),
+                self._build_message_metadata(message, user),
+            ):
+                return
+        
+        # Default: forward to chief agent
         await self._handle_message(
             sender_id=self._sender_id(user),
             chat_id=str(message.chat_id),
@@ -777,6 +1144,15 @@ class TelegramChannel(BaseChannel):
             metadata=self._build_message_metadata(message, user),
             session_key=self._derive_topic_session_key(message),
         )
+    
+    def _get_subagent_username(self, subagent_id: str) -> str | None:
+        """Get the username for a subagent from config."""
+        config = self._subagent_configs.get(subagent_id, {})
+        # Use bot_username from config, fallback to derived from subagent_id
+        bot_username = config.get("bot_username", "")
+        if bot_username:
+            return bot_username.replace("@", "")
+        return subagent_id.replace("_", "")
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
@@ -857,7 +1233,24 @@ class TelegramChannel(BaseChannel):
         self._start_typing(str_chat_id)
         await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
 
-        # Forward to the message bus
+        # Check for subagent mentions (@subagent_name)
+        subagent_id = self._extract_subagent_mention(content)
+        if subagent_id:
+            # Check if this is a direct subagent request
+            # (the subagent is mentioned AND the sender is allowed)
+            subagent_config = self._subagent_configs.get(subagent_id, {})
+            allowed_from = subagent_config.get("allow_from", [])
+            sender_id_clean = sender_id.split("|")[0] if "|" in sender_id else sender_id
+            
+            # Check if sender is allowed for this subagent
+            can_access = not allowed_from or sender_id_clean in allowed_from
+            
+            if can_access and subagent_config.get("respond_to_mentions", True):
+                # Route to subagent
+                if await self._route_to_subagent(subagent_id, content, str_chat_id, sender_id, metadata):
+                    return
+
+        # Forward to the message bus (default chief agent)
         await self._handle_message(
             sender_id=sender_id,
             chat_id=str_chat_id,
