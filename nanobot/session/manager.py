@@ -238,6 +238,49 @@ class SessionManager:
         """Remove a session from the in-memory cache."""
         self._cache.pop(key, None)
 
+    def get_subagent_session(self, role: str, parent_key: str) -> Session:
+        """
+        Get or create a subagent session for a specific role.
+
+        Args:
+            role: Subagent role (e.g., "coding_expert", "websearch_expert")
+            parent_key: Parent session key (e.g., "telegram:123")
+
+        Returns:
+            The subagent session.
+        """
+        subagent_key = f"subagent:{role}:{parent_key}"
+        return self.get_or_create(subagent_key)
+
+    def get_subagent_summary(self, role: str, parent_key: str, max_messages: int = 10) -> str:
+        """
+        Get a summary of recent subagent work for context injection.
+
+        Args:
+            role: Subagent role
+            parent_key: Parent session key
+            max_messages: Number of recent interactions to include
+
+        Returns:
+            Summary string for context injection.
+        """
+        session = self.get_subagent_session(role, parent_key)
+        messages = session.get_history(max_messages=max_messages)
+
+        if not messages:
+            return ""
+
+        lines = []
+        for msg in messages[-max_messages:]:
+            role = msg.get("role", "?")
+            content = msg.get("content", "")
+            if role == "user":
+                lines.append(f"Task: {content[:200]}")
+            elif role == "assistant" and content:
+                lines.append(f"Result: {content[:200]}")
+
+        return "\n".join(lines) if lines else ""
+
     def list_sessions(self) -> list[dict[str, Any]]:
         """
         List all sessions.

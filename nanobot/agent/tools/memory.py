@@ -10,8 +10,9 @@ from nanobot.agent.memory import MemoryStore
 class MemoryTool(Tool):
     """Query and search agent memory."""
 
-    def __init__(self, workspace: Path | None = None):
+    def __init__(self, workspace: Path | None = None, subdirectory: str | None = None):
         self._workspace = workspace
+        self._subdirectory = subdirectory
 
     @property
     def name(self) -> str:
@@ -49,7 +50,10 @@ class MemoryTool(Tool):
             if not self._workspace:
                 return "Error: Workspace not configured"
 
-            store = MemoryStore(self._workspace)
+            if self._subdirectory:
+                store = MemoryStore(self._workspace / self._subdirectory)
+            else:
+                store = MemoryStore(self._workspace)
 
             if action == "search":
                 if not query:

@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-logger.add("~/.nanobot/workspace/logs/{time}-shell.log", rotation="1day")
 from nanobot.agent.tools.base import Tool
 
 
