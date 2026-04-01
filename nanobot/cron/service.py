@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any, Callable, Coroutine
 
 from loguru import logger
-logger.add("~/.nanobot/workspace/logs/{time}-cron.log", rotation="1day")
 from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronRunRecord, CronSchedule, CronStore
 
 

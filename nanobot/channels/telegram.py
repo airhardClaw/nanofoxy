@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 from loguru import logger
-logger.add("~/.nanobot/workspace/logs/{time}/telegram.log", rotation="1day")
 from pydantic import Field
 from telegram import Bot, BotCommand, ReactionTypeEmoji, ReplyParameters, Update
 from telegram.error import BadRequest, TimedOut
