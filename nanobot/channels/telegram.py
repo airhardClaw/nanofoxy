@@ -836,6 +836,21 @@ class TelegramChannel(BaseChannel):
     def _is_not_modified_error(exc: Exception) -> bool:
         return isinstance(exc, BadRequest) and "message is not modified" in str(exc).lower()
 
+    async def _call_with_retry(self, func, *args, **kwargs):
+        """Call a function with exponential backoff retry on Telegram errors."""
+        for attempt in range(1, _SEND_MAX_RETRIES + 1):
+            try:
+                return await func(*args, **kwargs)
+            except TimedOut:
+                if attempt == _SEND_MAX_RETRIES:
+                    raise
+                delay = _SEND_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                logger.warning("Telegram timeout (attempt {}/{}), retrying in {:.1f}s", 
+                    attempt, _SEND_MAX_RETRIES, delay)
+                await asyncio.sleep(delay)
+            except Exception:
+                raise
+
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
         """Progressive message editing: send on first delta, edit on subsequent ones."""
         if not self._app:
