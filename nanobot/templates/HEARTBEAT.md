@@ -14,3 +14,13 @@ If this file has no tasks (only headers and comments), the agent will skip the h
 
 <!-- Move completed tasks here or delete them -->
 
+
+## Auto-Dokumentation
+
+Nach jedem Heartbeat werden Tasks und Ergebnisse automatisch dokumentiert:
+- `memory/tasks/{datum}.md` - Aktuelle Tasks mit Results
+- `memory/plans/active.md` - Aktiver Plan (wird laufend aktualisiert)
+
+**Wichtig**: Nach dem Arbeiten an Tasks, schreibe Ergebnisse in Files!
+Nutze `write_file` um wichtige Informationen zu speichern.
+

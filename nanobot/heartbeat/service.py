@@ -60,6 +60,7 @@ class HeartbeatService:
         model: str,
         on_execute: Callable[[str], Coroutine[Any, Any, str]] | None = None,
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
+        on_documente: Callable[[str, str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
         timezone: str | None = None,
@@ -70,6 +71,7 @@ class HeartbeatService:
         self.model = model
         self.on_execute = on_execute
         self.on_notify = on_notify
+        self.on_documente = on_documente
         self.interval_s = interval_s
         self.enabled = enabled
         self.timezone = timezone
@@ -184,8 +186,19 @@ class HeartbeatService:
                         await self.on_notify(response)
                     else:
                         logger.info("Heartbeat: silenced by post-run evaluation")
+                    
+                    if self.on_documente:
+                        asyncio.create_task(self._documente_async(tasks, response))
         except Exception:
             logger.exception("Heartbeat execution failed")
+
+    async def _documente_async(self, tasks: str, response: str) -> None:
+        """Async documentation of heartbeat tasks and results."""
+        try:
+            if self.on_documente:
+                await self.on_documente(tasks, response)
+        except Exception:
+            logger.exception("Heartbeat documentation failed")
 
     async def trigger_now(self) -> str | None:
         """Manually trigger a heartbeat."""

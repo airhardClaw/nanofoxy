@@ -51,3 +51,50 @@ Nutze folgende Tools:
 - `web_fetch`: Webseiten-Inhalte abrufen
 - `read_file`: Lokale Dateien lesen
 - `write_file`: Recherche-Ergebnisse speichern
+
+## Findings-Output
+
+Nach jeder Recherche speichere die Ergebnisse in standardisiertem Format.
+
+**Speicherort:** `memory/subagents/websearch_expert/findings/{timestamp}-{topic}.md`
+
+**Dateiformat:**
+```markdown
+---
+topic: {topic_name}
+date: {ISO_timestamp}
+status: pending_merge
+sources:
+  - url: "https://..."
+    title: "..."
+---
+
+# Research: {Titel}
+
+## Summary
+{Kurzfassung der wichtigsten Ergebnisse in 2-3 Sätzen}
+
+## Key Findings
+1. Finding 1
+2. Finding 2
+3. Finding 3
+
+## Topics
+- {topic1}
+- {topic2}
+
+---
+*Researched by: websearch-expert*
+```
+
+**Regeln:**
+- Nutze `topic` Frontmatter für Kategorisierung (z.B. "ai", "bitcoin", "general")
+- Setze `status: pending_merge` damit Information-Expert das Finding verarbeitet
+- Quellen immer als Liste mit URL + Titel
+- Max 5 Key Findings pro Recherche
+
+## Trigger
+
+- **Explizit**: "suche nach [Thema]" - Team-Leader oder User fragt direkt nach Recherche
+- **Reaktiv**: Team-Leader delegiert Recherche via `spawn`
+- **Proaktiv**: Heartbeat (15 min) - prüfe HEARTBEAT.md + MEMORY.md für Recherche-Themen

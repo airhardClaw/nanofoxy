@@ -8,9 +8,9 @@
   "allow_from": [],
   "respond_to_mentions": true,
   "heartbeat": {
-    "enabled": false,
-    "task": "Check for new information needs",
-    "interval_s": 1800
+    "enabled": true,
+    "task": "Check HEARTBEAT.md + MEMORY.md for research topics, proactively research interesting topics, save findings to memory/subagents/websearch_expert/findings/",
+    "interval_s": 900
   },
   "memory_dir": "memory/subagents/websearch_expert",
   "max_iterations": 15

@@ -8,9 +8,9 @@
   "allow_from": [],
   "respond_to_mentions": true,
   "heartbeat": {
-    "enabled": false,
-    "task": "Check for documentation needs",
-    "interval_s": 1800
+    "enabled": true,
+    "task": "Check memory/subagents/websearch_expert/findings/ for pending_merge findings, merge into /home/sir-airhard/ZeroBrain/ZeroBrain/RESEARCH/{topic}/2026.md, update status to merged",
+    "interval_s": 900
   },
   "memory_dir": "memory/subagents/information_expert",
   "max_iterations": 15
