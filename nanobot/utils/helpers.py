@@ -58,16 +58,51 @@ def timestamp() -> str:
 def current_time_str(timezone: str | None = None) -> str:
     """Human-readable current time with weekday and UTC offset.
 
-    When *timezone* is a valid IANA name (e.g. ``"Asia/Shanghai"``), the time
-    is converted to that zone.  Otherwise falls back to the host local time.
+    Handles both IANA timezones (e.g. "Europe/Berlin") and common abbreviations
+    like "UTC+1", "CET", "CEST", "GMT+2", etc.
     """
-    from zoneinfo import ZoneInfo
+    import re
+    from datetime import timedelta
 
-    try:
-        tz = ZoneInfo(timezone) if timezone else None
-    except (KeyError, Exception):
-        tz = None
+    IANA_MAP = {
+        'CET': 'Europe/Berlin',
+        'CEST': 'Europe/Berlin',
+        'BST': 'Europe/Berlin',
+    }
+    
+    def parse_offset_to_timedelta(tz_str: str) -> timedelta | None:
+        """Parse offset strings like 'UTC+1', 'GMT+2', '+1' into timedelta."""
+        match = re.match(r'^(UTC|GMT)?([+-])?(\d+)$', tz_str.upper().strip())
+        if match:
+            sign = match.group(2) or '+'
+            hours = int(match.group(3))
+            if sign == '-':
+                hours = -hours
+            return timedelta(hours=hours)
+        return None
 
+    tz = None
+    
+    if timezone:
+        normalized = IANA_MAP.get(timezone.upper())
+        if normalized:
+            try:
+                from zoneinfo import ZoneInfo
+                tz = ZoneInfo(normalized)
+            except:
+                pass
+        else:
+            delta = parse_offset_to_timedelta(timezone)
+            if delta:
+                from datetime import timezone as tzmodule
+                tz = tzmodule(delta)
+            else:
+                try:
+                    from zoneinfo import ZoneInfo
+                    tz = ZoneInfo(timezone)
+                except:
+                    pass
+    
     now = datetime.now(tz=tz) if tz else datetime.now().astimezone()
     offset = now.strftime("%z")
     offset_fmt = f"{offset[:3]}:{offset[3:]}" if len(offset) == 5 else offset

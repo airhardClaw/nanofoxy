@@ -44,11 +44,13 @@ _SAVE_MEMORY_TOOL = [
     }
 ]
 
-_MEMORY_TEMPLATE = """## Facts
+_MEMORY_TEMPLATE = """## Facts (Beständige Fakten - NICHT löschen)
 {facts}
 
-## Important Context
-{context}"""
+## Current Context (Wird bei jedem Merge aktualisiert)
+- **Last Updated**: {timestamp}
+- **Active Projects**: 
+- **Current Tasks**: """
 
 
 def _ensure_text(value: Any) -> str:
@@ -82,7 +84,7 @@ class MemoryStore:
     """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
 
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
-    _MAX_BACKUPS = 5  # Keep up to 5 backups
+    _MAX_BACKUPS = 2  # Keep up to 2 backups (merge strategy minimizes data loss)
 
     def __init__(self, workspace: Path):
         self.memory_dir = ensure_dir(workspace / "memory")
@@ -317,8 +319,8 @@ class MemoryStore:
 
             self.append_history(entry)
             update = _ensure_text(update)
-            if update != current_memory:
-                if not self.update_memory_safely(update):
+            if update.strip():
+                if not self.merge_memory_update(update):
                     logger.warning("Memory consolidation: rejected unsafe memory update")
                     return self._fail_or_raw_archive(messages)
 
