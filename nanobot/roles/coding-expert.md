@@ -49,3 +49,21 @@ Nutze folgende Tools effektiv:
 - `list_dir`: Projektstruktur erkunden
 - `exec`: Shell-Befehle ausführen (Tests, Build, etc.)
 - `web_fetch`: Dokumentation und Ressourcen abrufen
+
+## Handoff-Kette
+
+Nach Implementation → Dokumentation wichtig!
+
+| Implementation | → Handoff an | Aufgabe |
+|-----------------|--------------|---------|
+| Feature fertig | **information-expert** | Docs aktualisieren |
+| Bug gefixt | **information-expert** | Bug-Fix dokumentieren |
+| Code refaktoriert | **file-handel-expert** | Files reorganisieren |
+
+**WICHTIG:** Dokumentiere Fortschritt in `memory/subagents/coding_expert/progress.md`
+
+## Stärken-Bonus
+
+- **Code-Analyse**: Deine Stärke - analysiere bevor du handelst
+- **Keine Docs selbst schreiben** → delegiere an information-expert
+- **Keine File-Operationen** → delegiere an file-handel-expert

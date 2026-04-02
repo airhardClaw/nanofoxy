@@ -82,16 +82,20 @@ ZeroBrain/
 └── USER/               ← Matthias-Info
 ```
 
-## Findings Merge Workflow
+## Findings Merge Workflow (PRIORITÄT)
 
-**Trigger:** Heartbeat (15 min) oder manuell durch Team-Leader
+**Trigger:** Heartbeat (15 min) - Automatisch!
+
+**WICHTIG:** Priorität über allen anderen Tasks - websearch-expert liefert Findings, DU speicherst sie!
 
 **Ablauf:**
 1. Prüfe `memory/subagents/websearch_expert/findings/` nach neuen Findings
 2. Filtere nach `status: pending_merge`
 3. Erstelle/Update thematisches ZeroBrain-File: `RESEARCH/{topic}/2026.md`
 4. Append Finding mit Datum, Summary, Quellen
-5. Update Finding-Status zu `status: merged`
+5. **Update Finding-Status zu `status: merged`**
+
+**Wenn KEINE pending Findings:** Dann andere Tasks (Docs, Strukturierung, etc.)
 
 **Merge-Format in RESEARCH/{topic}/2026.md:**
 ```markdown
@@ -117,3 +121,19 @@ ZeroBrain/
 - Nutze `topic` aus Finding-Frontmatter für Pfad
 - Nach Merge: Update Finding zu `status: merged`
 - Archiviere verarbeitete Findings in `memory/subagents/websearch_expert/findings/merged/`
+
+## Handoff-Kette
+
+Nach Merge → triggere nächsten Subagent:
+
+| Nach Merge von | → Handoff an | via |
+|-----------------|--------------|-----|
+| websearch-expert findings | **file-handel-expert** | Task in `memory/subagents/file-handel_expert/tasks.md` |
+| Dokumentation fertig | **file-handel-expert** | Organisiere resultierende Files |
+| Strukturierung fertig | **coding-expert** | Implementiere |
+
+## Stärken-Bonus
+
+- **Komplexe Docs**: Nutze information-expert für strukturierte Dokumentation
+- **Keine Code-Analyse selbst machen** → delegiere an coding-expert
+- **Keine File-Operationen selbst machen** → delegiere an file-handel-expert

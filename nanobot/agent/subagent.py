@@ -24,7 +24,7 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import ExecToolConfig
+from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import SessionManager
 
@@ -44,8 +44,6 @@ class SubagentManager:
         restrict_to_workspace: bool = False,
         session_manager: "SessionManager | None" = None,
     ):
-        from nanobot.config.schema import ExecToolConfig, WebSearchConfig
-
         self.provider = provider
         self.workspace = workspace
         self.bus = bus

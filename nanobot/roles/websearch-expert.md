@@ -98,3 +98,17 @@ sources:
 - **Explizit**: "suche nach [Thema]" - Team-Leader oder User fragt direkt nach Recherche
 - **Reaktiv**: Team-Leader delegiert Recherche via `spawn`
 - **Proaktiv**: Heartbeat (15 min) - prüfe HEARTBEAT.md + MEMORY.md für Recherche-Themen
+
+## Handoff an Information-Expert (AUTOMATISCH)
+
+Wenn Recherche abgeschlossen → speichere Findings mit `status: pending_merge`!
+
+Das triggert information-expert via Heartbeat (15 min) automatisch.
+
+**Speicherort:** `memory/subagents/websearch_expert/findings/{timestamp}-{topic}.md`
+
+**Regeln:**
+- Nutze `topic` Frontmatter für Kategorisierung (z.B. "ai", "bitcoin", "general")
+- **Setze UNBEDINGT `status: pending_merge`** → information-expert merged automatisch
+- Quellen immer als Liste mit URL + Titel
+- Max 5 Key Findings pro Recherche

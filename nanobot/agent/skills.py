@@ -190,16 +190,6 @@ class SkillsLoader:
         meta = self.get_skill_metadata(name) or {}
         return self._parse_nanobot_metadata(meta.get("metadata", ""))
 
-    def get_always_skills(self) -> list[str]:
-        """Get skills marked as always=true that meet requirements."""
-        result = []
-        for s in self.list_skills(filter_unavailable=True):
-            meta = self.get_skill_metadata(s["name"]) or {}
-            skill_meta = self._parse_nanobot_metadata(meta.get("metadata", ""))
-            if skill_meta.get("always") or meta.get("always"):
-                result.append(s["name"])
-        return result
-
     def get_skill_metadata(self, name: str) -> dict | None:
         """
         Get metadata from a skill's frontmatter.
@@ -222,7 +212,63 @@ class SkillsLoader:
                 for line in match.group(1).split("\n"):
                     if ":" in line:
                         key, value = line.split(":", 1)
-                        metadata[key.strip()] = value.strip().strip('"\'')
+                        key = key.strip()
+                        value = value.strip().strip('"\'')
+
+                        # Handle trigger_patterns as list
+                        if key == "trigger_patterns":
+                            if value.startswith("["):
+                                import ast
+                                try:
+                                    metadata[key] = ast.literal_eval(value)
+                                except:
+                                    metadata[key] = [value]
+                            else:
+                                metadata[key] = [value]
+                        else:
+                            metadata[key] = value
                 return metadata
 
         return None
+
+    def get_skill_by_trigger(self, user_input: str) -> list[str]:
+        """Find skills whose trigger_patterns match user input."""
+        matched = []
+        input_lower = user_input.lower()
+
+        for skill in self.list_skills(filter_unavailable=True):
+            meta = self.get_skill_metadata(skill["name"])
+            if not meta:
+                continue
+            triggers = meta.get("trigger_patterns", [])
+
+            for trigger in triggers:
+                if trigger.lower() in input_lower:
+                    matched.append(skill["name"])
+                    break
+
+        return matched
+
+    def get_always_skills(self) -> list[str]:
+        """Get skills marked as always=true that meet requirements + extras for small models."""
+        result = []
+
+        # Phase 4.1: Bestehende always=true Skills
+        for s in self.list_skills(filter_unavailable=True):
+            meta = self.get_skill_metadata(s["name"]) or {}
+            skill_meta = self._parse_nanobot_metadata(meta.get("metadata", ""))
+            if skill_meta.get("always") or meta.get("always"):
+                result.append(s["name"])
+
+        # Phase 4.2: Extra always-skills für 7B Modell (exec/cron needed)
+        extra_for_small_model = [
+            "get-crypto-price",
+            "weather",
+            "cron",
+        ]
+
+        for skill in extra_for_small_model:
+            if skill not in result and self.load_skill(skill):
+                result.append(skill)
+
+        return result

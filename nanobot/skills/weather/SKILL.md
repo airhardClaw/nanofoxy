@@ -2,6 +2,14 @@
 name: weather
 description: Get current weather and forecasts (no API key required).
 homepage: https://wttr.in/:help
+trigger_patterns:
+  - "wetter"
+  - "forecast"
+  - "regen"
+  - "sonne"
+  - "temperatur"
+  - "wetteraussicht"
+always: true
 metadata: {"nanobot":{"emoji":"🌤️","requires":{"bins":["curl"]}}}
 ---
 
