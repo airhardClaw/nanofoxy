@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-logger.add("~/.nanobot/workspace/logs/{time}/session-manager.log", rotation="1day")
 from nanobot.config.paths import get_legacy_sessions_dir
 from nanobot.utils.helpers import ensure_dir, safe_filename
 
