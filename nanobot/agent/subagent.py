@@ -82,7 +82,7 @@ class SubagentManager:
         # Load role configuration
         role_content = self._load_role(role)
         if not role_content:
-            return f"Role '{role}' not found. Available roles: coding-expert, websearch-expert, file-handel-expert, information-expert"
+            return f"Role '{role}' not found. Available roles: coding-expert, websearch-expert, file-expert, information-expert"
         
         # Load subagent configuration
         subagent_config = self._load_subagent_config(subagent_id)
@@ -123,7 +123,7 @@ class SubagentManager:
         bg_task.add_done_callback(_cleanup)
         
         logger.info("Spawned subagent [{}] with role {}", task_id, role)
-        return f"Subagent [{role}] gestartet (id: {task_id}). Ich melde mich wenn er fertig ist."
+        return f"Subagent [{role}] started (id: {task_id}). I'll report back when it's done."
     
     def _load_role(self, role_name: str) -> str | None:
         """Load role definition from roles directory."""

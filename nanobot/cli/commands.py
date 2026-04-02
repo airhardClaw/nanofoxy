@@ -703,7 +703,7 @@ Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 *Auto-updated by heartbeat*
 """
         active_plan.write_text(plan_content, encoding="utf-8")
-        logger.debug("Heartbeat documented to memory files")
+        console.print("[dim]Heartbeat documented to memory files[/dim]")
 
     hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(

@@ -91,16 +91,23 @@ class CronService:
                 data = json.loads(self.store_path.read_text(encoding="utf-8"))
                 jobs = []
                 for j in data.get("jobs", []):
+                    # Add null checks for required fields
+                    if not j.get("id") or not j.get("name"):
+                        continue
+                    schedule_data = j.get("schedule", {})
+                    if not schedule_data:
+                        continue
+                    
                     jobs.append(CronJob(
                         id=j["id"],
                         name=j["name"],
                         enabled=j.get("enabled", True),
                         schedule=CronSchedule(
-                            kind=j["schedule"]["kind"],
-                            at_ms=j["schedule"].get("atMs"),
-                            every_ms=j["schedule"].get("everyMs"),
-                            expr=j["schedule"].get("expr"),
-                            tz=j["schedule"].get("tz"),
+                            kind=schedule_data.get("kind", "once"),
+                            at_ms=schedule_data.get("atMs"),
+                            every_ms=schedule_data.get("everyMs"),
+                            expr=schedule_data.get("expr"),
+                            tz=schedule_data.get("tz"),
                         ),
                         payload=CronPayload(
                             kind=j["payload"].get("kind", "agent_turn"),

@@ -167,8 +167,20 @@ class ExecTool(Tool):
             return "Error: Command blocked by safety guard (internal/private URL detected)"
 
         if self.restrict_to_workspace:
-            if "..\\" in cmd or "../" in cmd:
-                return "Error: Command blocked by safety guard (path traversal detected)"
+            # Check for path traversal patterns (including URL-encoded)
+            traversal_patterns = [
+                "..\\",  # Windows backslash
+                "../",   # Unix forward slash
+                "..%2f", # URL-encoded
+                "..%5c", # URL-encoded backslash
+                "%2e%2e",  # Double dot encoded
+                "%2e%2e%2f",  # ../ encoded
+                "%2e%2e%5c",  # ..\ encoded
+            ]
+            cmd_lower = cmd.lower()
+            for pattern in traversal_patterns:
+                if pattern in cmd_lower:
+                    return "Error: Command blocked by safety guard (path traversal detected)"
 
             cwd_path = Path(cwd).resolve()
 

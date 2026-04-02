@@ -702,14 +702,20 @@ class TelegramChannel(BaseChannel):
             
             logger.debug("Looking for subagent with role: {}", subagent_role)
             
-            # Try to find subagent by matching role in configs
+            # Try to find subagent by matching role in configs - with proper fallback
+            found_subagent = None
             for sa_id, sa_config in self._subagent_configs.items():
                 config_role = sa_config.get("role", "").replace(" ", "-").lower()
                 if config_role == subagent_role:
                     if sa_id in self._subagent_apps:
-                        bot = self._subagent_apps[sa_id].bot
-                        logger.info("Sending response via subagent bot: {} (role={})", sa_id, config_role)
+                        found_subagent = sa_id
                         break
+            
+            if found_subagent:
+                bot = self._subagent_apps[found_subagent].bot
+                logger.info("Sending response via subagent bot: {} (role={})", found_subagent, subagent_role)
+            else:
+                logger.warning("Subagent bot not found for role: '{}', using chief bot", subagent_role)
         
         if not self._app:
             logger.warning("Telegram bot not running")

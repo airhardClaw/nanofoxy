@@ -183,8 +183,7 @@ class AgentLoop:
                 except Exception:
                     pass
                 self._mcp_stack = None
-        finally:
-            self._mcp_connecting = False
+            self._mcp_connecting = False  # Only reset on error, not in finally
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
@@ -426,9 +425,12 @@ class AgentLoop:
                 if "Result:" in msg.content:
                     result_content = msg.content.split("Result:")[1].strip()
                 
+                # Extract original channel from chat_id prefix (format: "channel:chat_id")
+                original_channel = msg.chat_id.split(":")[0] if ":" in msg.chat_id else "telegram"
+                
                 # Send result to the original chat via the correct bot
                 return OutboundMessage(
-                    channel="telegram",
+                    channel=original_channel,
                     chat_id=original_chat_id,
                     content=result_content,
                     metadata={"_from_subagent": True, "_subagent_id": subagent_role},
@@ -458,7 +460,15 @@ class AgentLoop:
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
-        key = session_key or msg.session_key
+        # Get session key with proper fallback
+        if session_key:
+            key = session_key
+        elif msg.session_key:
+            key = msg.session_key
+        else:
+            # Fallback: derive from channel and chat_id
+            key = f"{msg.channel}:{msg.chat_id}"
+        
         session = self.sessions.get_or_create(key)
 
         # Check if this is a subagent request (from Telegram routing)
