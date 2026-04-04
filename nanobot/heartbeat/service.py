@@ -103,7 +103,14 @@ class HeartbeatService:
 
         response = await self.provider.chat_with_retry(
             messages=[
-                {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
+                {"role": "system", "content": (
+                    "You are a heartbeat agent. Call the heartbeat tool to report your decision.\n\n"
+                    "CRITICAL RULES:\n"
+                    "1. BEFORE marking ANY task as [x], verify you actually performed the work\n"
+                    "2. If task was already marked [x] TODAY → SKIP (no duplicate completions)\n"
+                    "3. Only [x] if NEW work, NEW results, NEW file modifications\n"
+                    "4. Without evidence (file path) → keep as [ ] (not complete)"
+                )},
                 {"role": "user", "content": (
                     f"Current Time: {current_time_str(self.timezone)}\n\n"
                     "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
