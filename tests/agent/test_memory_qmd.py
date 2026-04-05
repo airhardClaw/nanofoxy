@@ -27,7 +27,7 @@ class TestQMDConfigSchema:
         assert memory.backend == "builtin"
         assert memory.qmd.update_interval_seconds == 300
         assert memory.qmd.sessions.enabled is True
-        assert memory.qmd.limits.timeout_ms == 4000
+        assert memory.qmd.limits.timeout_ms == 2000  # Optimized for 8B models
 
     def test_qmd_config_from_dict(self):
         """Test QMD config can be created from dict."""

@@ -84,6 +84,39 @@ Main configuration model.
 
 ---
 
+## LM Studio Configuration (Qwen2.5-8B)
+
+Example for running Qwen2.5-8B (Q4_K_S) via LM Studio:
+
+```yaml
+# LM Studio with Qwen2.5-8B (Q4_K_S)
+provider:
+  name: lmstudio
+  api_base: http://localhost:1234/v1
+  # No api_key needed for local
+
+agents:
+  defaults:
+    model: qwen2.5-8b-instruct
+    contextWindowTokens: 128000
+    maxTokens: 4096
+    temperature: 0.7
+    maxToolIterations: 30
+
+channels:
+  telegram:
+    enabled: true
+    config:
+      token: ${TELEGRAM_BOT_TOKEN}
+      streaming: true  # Enable streaming for faster responses
+```
+
+**Requirements:**
+- LM Studio running with Qwen2.5-8B model loaded
+- API server enabled on port 1234 (default)
+
+---
+
 ## Configuration File Example
 
 ```yaml

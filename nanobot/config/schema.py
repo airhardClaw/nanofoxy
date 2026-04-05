@@ -29,17 +29,17 @@ class ChannelsConfig(Base):
 
 
 class AgentDefaults(Base):
-    """Default agent configuration."""
+    """Default agent configuration optimized for Qwen2.5-8B via LM Studio."""
 
     workspace: str = "~/.nanobot/workspace"
-    model: str = "anthropic/claude-opus-4-5"
+    model: str = "qwen2.5-8b-instruct"  # Optimized for local 8B model
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
-    max_tokens: int = 8192
-    context_window_tokens: int = 65_536
-    temperature: float = 0.1
-    max_tool_iterations: int = 40
+    max_tokens: int = 4096  # Reduced for 8B efficiency
+    context_window_tokens: int = 128_000  # Full context for Qwen2.5
+    temperature: float = 0.7  # Slightly higher for creativity
+    max_tool_iterations: int = 30  # Reduced - 8B is faster
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
 
@@ -183,9 +183,9 @@ class QMDSearchScope(Base):
 
 
 class QMDLimitsConfig(Base):
-    """Limits for QMD operations."""
+    """Limits for QMD operations optimized for 8B models."""
 
-    timeout_ms: int = 4000  # Search timeout in milliseconds
+    timeout_ms: int = 2000  # Reduced for faster 8B models
 
 
 class QMDConfig(Base):
@@ -228,14 +228,14 @@ class DreamingLightConfig(DreamingPhaseConfig):
 
 
 class DreamingDeepConfig(DreamingPhaseConfig):
-    """Deep phase configuration - promotes candidates to durable memory."""
+    """Deep phase configuration - promotes candidates to durable memory (optimized for 8B)."""
 
     cron: str = "0 3 * * *"  # Daily at 3 AM
     lookback_days: int = 30
     limit: int = 10
-    min_score: float = 0.8  # Minimum weighted score for promotion
-    min_recall_count: int = 3  # Minimum recall count threshold
-    min_unique_queries: int = 3  # Minimum distinct query count
+    min_score: float = 0.7  # Lower threshold for 8B with larger context
+    min_recall_count: int = 2  # Reduced threshold
+    min_unique_queries: int = 2  # Reduced threshold
     recency_half_life_days: int = 14  # Days for recency score to halve
     max_age_days: int = 30  # Max daily-note age for promotion
     sources: list[str] = Field(default_factory=lambda: ["daily", "memory", "sessions", "logs", "recall"])

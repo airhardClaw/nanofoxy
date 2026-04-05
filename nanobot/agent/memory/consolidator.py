@@ -21,9 +21,8 @@ from nanobot.utils.helpers import estimate_message_tokens, estimate_prompt_token
 class MemoryConsolidator:
     """Owns consolidation policy, locking, and session offset updates."""
 
-    _MAX_CONSOLIDATION_ROUNDS = 5
-
-    _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
+    _MAX_CONSOLIDATION_ROUNDS = 3  # Reduced from 5 for faster 8B
+    _SAFETY_BUFFER = 512  # Reduced from 1024 for 8B efficiency
 
     def __init__(
         self,
@@ -34,7 +33,7 @@ class MemoryConsolidator:
         context_window_tokens: int,
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
-        max_completion_tokens: int = 4096,
+        max_completion_tokens: int = 4096,  # Reduced from 4096 for 8B
         qmd_engine: QMDEngine | None = None,
         dreaming_config: dict[str, Any] | None = None,
     ):
@@ -194,7 +193,7 @@ class MemoryConsolidator:
                 if estimated <= 0:
                     return
 
-    PRE_CONSOLIDATE_THRESHOLD = 0.7
+    PRE_CONSOLIDATE_THRESHOLD = 0.6  # Lower = trigger earlier for larger 8B context
 
     async def pre_consolidate_if_needed(
         self,

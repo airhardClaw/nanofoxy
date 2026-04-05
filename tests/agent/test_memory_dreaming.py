@@ -29,8 +29,8 @@ class TestDreamingConfigSchema:
         assert dreaming.deep.cron == "0 3 * * *"
         assert dreaming.rem.cron == "0 5 * * 0"
         assert dreaming.light.limit == 100
-        assert dreaming.deep.min_score == 0.8
-        assert dreaming.deep.min_recall_count == 3
+        assert dreaming.deep.min_score == 0.7  # Optimized for 8B with larger context
+        assert dreaming.deep.min_recall_count == 2  # Reduced for 8B
 
     def test_dreaming_config_from_dict(self):
         """Test Dreaming config can be created from dict."""

@@ -24,7 +24,7 @@ def test_load_config_keeps_max_tokens_and_ignores_legacy_memory_window(tmp_path)
     config = load_config(config_path)
 
     assert config.agents.defaults.max_tokens == 1234
-    assert config.agents.defaults.context_window_tokens == 65_536
+    assert config.agents.defaults.context_window_tokens == 128_000  # Optimized for Qwen2.5-8B
     assert not hasattr(config.agents.defaults, "memory_window")
 
 

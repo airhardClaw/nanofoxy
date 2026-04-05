@@ -317,6 +317,17 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="11434",
         default_api_base="http://localhost:11434/v1",
     ),
+    # LM Studio (local, OpenAI-compatible for Qwen2.5-8B)
+    ProviderSpec(
+        name="lmstudio",
+        keywords=("lmstudio", "lm_studio"),
+        env_key="",
+        display_name="LM Studio",
+        backend="openai_compat",
+        is_local=True,
+        detect_by_base_keyword="1234",
+        default_api_base="http://localhost:1234/v1",
+    ),
     # === OpenVINO Model Server (direct, local, OpenAI-compatible at /v3) ===
     ProviderSpec(
         name="ovms",
