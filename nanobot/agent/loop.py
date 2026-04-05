@@ -19,6 +19,8 @@ from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+from nanobot.utils.helpers import smart_truncate_messages
+from nanobot.providers.base import LLMProvider
 from nanobot.agent.tools.filesystem import (
     EditFileTool,
     ListDirTool,
@@ -281,6 +283,9 @@ class AgentLoop:
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
+        elif result.stop_reason == "context_window_error":
+            logger.warning("Context window error detected, will retry with truncated messages")
+            raise LLMProvider.ContextWindowError("Context window exceeded during execution")
         elif result.stop_reason == "error":
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
         return result.final_content, result.tools_used, result.messages
@@ -504,6 +509,8 @@ class AgentLoop:
             return result
 
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        
+        await self.memory_consolidator.pre_consolidate_if_needed(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
@@ -511,12 +518,6 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=0)
-        initial_messages = self.context.build_messages(
-            history=history,
-            current_message=msg.content,
-            media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
-        )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
@@ -526,14 +527,50 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages,
-            on_progress=on_progress or _bus_progress,
-            on_stream=on_stream,
-            on_stream_end=on_stream_end,
-            channel=msg.channel, chat_id=msg.chat_id,
-            message_id=msg.metadata.get("message_id"),
-        )
+        retry_count = 0
+        max_retries = 2
+        all_msgs = []
+        
+        def _build_messages(h):
+            return self.context.build_messages(
+                history=h,
+                current_message=msg.content,
+                media=msg.media if msg.media else None,
+                channel=msg.channel, chat_id=msg.chat_id,
+            )
+        
+        initial_messages = _build_messages(history)
+        
+        while retry_count <= max_retries:
+            try:
+                final_content, _, all_msgs = await self._run_agent_loop(
+                    initial_messages,
+                    on_progress=on_progress or _bus_progress,
+                    on_stream=on_stream,
+                    on_stream_end=on_stream_end,
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    message_id=msg.metadata.get("message_id"),
+                )
+                break
+            except LLMProvider.ContextWindowError as e:
+                retry_count += 1
+                logger.warning(
+                    "Context window error (attempt {}/{}), truncating messages and retrying",
+                    retry_count, max_retries + 1,
+                )
+                
+                budget = self.memory_consolidator.context_window_tokens - self.memory_consolidator.max_completion_tokens - 1024
+                truncated_history = smart_truncate_messages(
+                    history,
+                    max_tokens=int(budget * 0.4),
+                    tools=self.tools.get_definitions(),
+                )
+                initial_messages = _build_messages(truncated_history)
+                
+                if retry_count > max_retries:
+                    logger.error("Context window error: max retries exceeded")
+                    final_content = "Context window exceeded after multiple attempts. Please try a shorter message."
+                    all_msgs = []
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."

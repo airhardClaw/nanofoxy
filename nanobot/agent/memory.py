@@ -497,3 +497,74 @@ class MemoryConsolidator:
                 estimated, source = self.estimate_session_prompt_tokens(session)
                 if estimated <= 0:
                     return
+
+    PRE_CONSOLIDATE_THRESHOLD = 0.7
+
+    async def pre_consolidate_if_needed(
+        self,
+        session: Session,
+    ) -> bool:
+        """Proactively consolidate messages BEFORE sending to LLM.
+        
+        Called when context usage exceeds threshold to prevent context window errors.
+        Returns True if consolidation was performed or not needed.
+        """
+        if not session.messages or self.context_window_tokens <= 0:
+            return True
+
+        lock = self.get_lock(session.key)
+        async with lock:
+            budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
+            threshold = int(budget * self.PRE_CONSOLIDATE_THRESHOLD)
+            
+            estimated, source = self.estimate_session_prompt_tokens(session)
+            if estimated <= 0:
+                return True
+            
+            if estimated < threshold:
+                return True
+            
+            logger.info(
+                "Pre-consolidation for {}: {}/{} (threshold {})",
+                session.key,
+                estimated,
+                self.context_window_tokens,
+                threshold,
+            )
+            
+            target = int(budget * 0.5)
+            for round_num in range(self._MAX_CONSOLIDATION_ROUNDS):
+                if estimated <= target:
+                    break
+
+                boundary = self.pick_consolidation_boundary(session, max(1, estimated - target))
+                if boundary is None:
+                    break
+
+                end_idx = boundary[0]
+                chunk = session.messages[session.last_consolidated:end_idx]
+                if not chunk:
+                    break
+
+                logger.info(
+                    "Pre-consolidation round {} for {}: archiving {} msgs",
+                    round_num,
+                    session.key,
+                    len(chunk),
+                )
+                if not await self.consolidate_messages(chunk):
+                    break
+                session.last_consolidated = end_idx
+                self.sessions.save(session)
+
+                estimated, source = self.estimate_session_prompt_tokens(session)
+                if estimated <= 0:
+                    break
+
+            logger.info(
+                "Pre-consolidation done for {}: {}/{}",
+                session.key,
+                estimated,
+                self.context_window_tokens,
+            )
+            return True

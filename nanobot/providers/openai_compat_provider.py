@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 import json_repair
+import httpx
 from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -135,6 +136,7 @@ class OpenAICompatProvider(LLMProvider):
             api_key=api_key or "no-key",
             base_url=effective_base,
             default_headers=default_headers,
+            timeout=httpx.Timeout(600.0),
         )
 
     def _setup_env(self, api_key: str, api_base: str | None) -> None:

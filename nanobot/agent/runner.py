@@ -91,6 +91,23 @@ class AgentRunner:
             else:
                 response = await self.provider.chat_with_retry(**kwargs)
 
+            from nanobot.utils.helpers import is_context_window_error
+            if is_context_window_error(response.content):
+                error = "Context window exceeded"
+                stop_reason = "context_window_error"
+                context.error = error
+                context.stop_reason = stop_reason
+                await hook.after_iteration(context)
+                return AgentRunResult(
+                    final_content="Context window exceeded. Reducing context and retrying...",
+                    messages=messages,
+                    tools_used=tools_used,
+                    usage=usage,
+                    stop_reason=stop_reason,
+                    error=error,
+                    tool_events=tool_events,
+                )
+
             raw_usage = response.usage or {}
             usage = {
                 "prompt_tokens": int(raw_usage.get("prompt_tokens", 0) or 0),

@@ -271,6 +271,117 @@ def estimate_prompt_tokens_chain(
     return 0, "none"
 
 
+_CONTEXT_WINDOW_ERROR_MARKERS = (
+    "context window",
+    "context limit",
+    "maximum context",
+    "too many tokens",
+    "exceeds max",
+    "token limit",
+    "max_tokens",
+    "input too long",
+    "request too large",
+    "length exceeded",
+    "messages too long",
+)
+
+
+def is_context_window_error(content: str | None) -> bool:
+    """Detect if an LLM error is caused by context window overflow."""
+    if not content:
+        return False
+    text = content.lower()
+    return any(marker in text for marker in _CONTEXT_WINDOW_ERROR_MARKERS)
+
+
+def smart_truncate_messages(
+    messages: list[dict[str, Any]],
+    max_tokens: int,
+    tools: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Intelligently truncate messages to fit within token budget.
+    
+    Priority order:
+    1. Keep last 2 user-assistant pairs (most important for context)
+    2. Keep tool definitions
+    3. Truncate older tool results first
+    4. Remove redundant reasoning_content
+    """
+    if not messages:
+        return messages
+    
+    def estimate_message(msg: dict[str, Any]) -> int:
+        return estimate_message_tokens(msg)
+    
+    current_tokens = sum(estimate_message(m) for m in messages)
+    if tools:
+        try:
+            enc = tiktoken.get_encoding("cl100k_base")
+            tools_tokens = len(enc.encode(json.dumps(tools, ensure_ascii=False)))
+        except Exception:
+            tools_tokens = len(json.dumps(tools)) // 4
+        current_tokens += tools_tokens
+    
+    if current_tokens <= max_tokens:
+        return messages
+    
+    result = []
+    found_recent_pairs = 0
+    recent_pairs: list[dict[str, Any]] = []
+    
+    for msg in messages:
+        msg_copy = dict(msg)
+        role = msg_copy.get("role")
+        
+        if role == "user":
+            result.append(msg_copy)
+            found_recent_pairs += 1
+            recent_pairs.append(msg_copy)
+            continue
+        
+        if role == "assistant":
+            result.append(msg_copy)
+            if msg_copy.get("content") or msg_copy.get("tool_calls"):
+                recent_pairs.append(msg_copy)
+            
+            if msg_copy.get("reasoning_content") and len(msg_copy.get("reasoning_content", "")) > 500:
+                msg_copy["reasoning_content"] = msg_copy["reasoning_content"][:500] + "..."
+            continue
+        
+        if role == "tool":
+            content = msg_copy.get("content")
+            if isinstance(content, str) and len(content) > 4000:
+                msg_copy["content"] = content[:4000] + "\n... (truncated)"
+            result.append(msg_copy)
+            continue
+        
+        result.append(msg_copy)
+    
+    current_tokens = sum(estimate_message(m) for m in result)
+    if tools:
+        try:
+            enc = tiktoken.get_encoding("cl100k_base")
+            tools_tokens = len(enc.encode(json.dumps(tools, ensure_ascii=False)))
+        except Exception:
+            tools_tokens = len(json.dumps(tools)) // 4
+        current_tokens += tools_tokens
+    
+    if current_tokens <= max_tokens:
+        return result
+    
+    for msg in result:
+        if msg.get("role") == "tool":
+            content = msg.get("content")
+            if isinstance(content, str) and len(content) > 2000:
+                msg["content"] = content[:2000] + "\n... (truncated)"
+            continue
+        
+        if msg.get("role") == "assistant" and msg.get("reasoning_content"):
+            msg["reasoning_content"] = "[reasoning truncated]"
+    
+    return result
+
+
 def build_status_content(
     *,
     version: str,

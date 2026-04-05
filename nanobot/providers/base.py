@@ -9,6 +9,8 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.utils.helpers import is_context_window_error
+
 @dataclass
 class ToolCallRequest:
     """A tool call request from the LLM."""
@@ -310,6 +312,12 @@ class LLMProvider(ABC):
 
         return await self._safe_chat_stream(**kw)
 
+    class ContextWindowError(Exception):
+        """Raised when LLM returns context window exceeded error."""
+        def __init__(self, message: str, original_content: str | None = None):
+            super().__init__(message)
+            self.original_content = original_content
+
     async def chat_with_retry(
         self,
         messages: list[dict[str, Any]],
@@ -344,6 +352,16 @@ class LLMProvider(ABC):
 
             if response.finish_reason != "error":
                 return response
+
+            if is_context_window_error(response.content):
+                logger.warning(
+                    "Context window error detected: {}",
+                    (response.content or "")[:200],
+                )
+                raise self.ContextWindowError(
+                    "Context window exceeded",
+                    original_content=response.content,
+                )
 
             if not self._is_transient_error(response.content):
                 stripped = self._strip_image_content(messages)
