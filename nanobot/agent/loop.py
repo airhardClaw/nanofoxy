@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.agent.memory import MemoryConsolidator
+from nanobot.agent.memory import MemoryConsolidator, QMDEngine
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
@@ -79,6 +79,8 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        memory_config: dict[str, Any] | None = None,
+        agent_id: str = "default",
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -126,6 +128,17 @@ class AgentLoop:
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
         )
+        
+        self._memory_config = memory_config or {}
+        self._qmd_engine: QMDEngine | None = None
+        
+        if self._memory_config.get("backend") == "qmd":
+            self._qmd_engine = QMDEngine(
+                workspace=workspace,
+                agent_id=agent_id,
+                config=self._memory_config.get("qmd", {}),
+            )
+        
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
             provider=provider,
@@ -135,6 +148,8 @@ class AgentLoop:
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
+            qmd_engine=self._qmd_engine,
+            dreaming_config=self._memory_config.get("dreaming"),
         )
         self._register_default_tools()
         self.commands = CommandRouter()
@@ -162,7 +177,12 @@ class AgentLoop:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
             )
-        self.tools.register(MemoryTool(workspace=self.workspace))
+        self.tools.register(MemoryTool(
+            workspace=self.workspace,
+            qmd_engine=self._qmd_engine,
+            citations=self._memory_config.get("citations", "auto"),
+            consolidator=self.memory_consolidator,
+        ))
         self.tools.register(SystemMonitorTool())
         self.tools.register(DescribeRoleTool())
 
@@ -294,6 +314,10 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
+        
+        if self._qmd_engine:
+            await self._qmd_engine.initialize()
+        
         logger.info("Agent loop started")
 
         while self._running:
@@ -398,9 +422,13 @@ class AgentLoop:
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
+        
+        if self._qmd_engine:
+            await self._qmd_engine.shutdown()
+        
         logger.info("Agent loop stopping")
 
     async def _process_message(

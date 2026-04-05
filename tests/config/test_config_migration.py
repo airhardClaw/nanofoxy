@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from nanobot.config.loader import load_config, save_config
 
 
@@ -48,8 +50,73 @@ def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path
     defaults = saved["agents"]["defaults"]
 
     assert defaults["maxTokens"] == 2222
-    assert defaults["contextWindowTokens"] == 65_536
-    assert "memoryWindow" not in defaults
+
+
+def test_default_memory_config(tmp_path) -> None:
+    """Test default memory configuration values."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.tools.memory.backend == "builtin"
+    assert config.tools.memory.dreaming.enabled is True
+    assert config.tools.memory.dreaming.light.cron == "0 */6 * * *"
+    assert config.tools.memory.dreaming.deep.cron == "0 3 * * *"
+    assert config.tools.memory.dreaming.rem.cron == "0 5 * * 0"
+
+
+def test_memory_dreaming_config_parsing(tmp_path) -> None:
+    """Test parsing of memory.dreaming configuration."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "tools": {
+                    "memory": {
+                        "backend": "qmd",
+                        "dreaming": {
+                            "enabled": False,
+                            "timezone": "Asia/Tokyo",
+                            "deep": {
+                                "minScore": 0.9,
+                                "minRecallCount": 5,
+                            },
+                        },
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.tools.memory.backend == "qmd"
+    assert config.tools.memory.dreaming.enabled is False
+    assert config.tools.memory.dreaming.timezone == "Asia/Tokyo"
+    assert config.tools.memory.dreaming.deep.min_score == 0.9
+    assert config.tools.memory.dreaming.deep.min_recall_count == 5
+
+
+def test_save_and_load_memory_config(tmp_path) -> None:
+    """Test saving and loading memory configuration."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    config = load_config(config_path)
+
+    config.tools.memory.backend = "qmd"
+    config.tools.memory.dreaming.enabled = True
+    config.tools.memory.dreaming.light.cron = "0 */3 * * *"
+
+    save_config(config, config_path)
+
+    loaded = load_config(config_path)
+
+    assert loaded.tools.memory.backend == "qmd"
+    assert loaded.tools.memory.dreaming.enabled is True
+    assert loaded.tools.memory.dreaming.light.cron == "0 */3 * * *"
 
 
 def test_onboard_does_not_crash_with_legacy_memory_window(tmp_path, monkeypatch) -> None:

@@ -553,6 +553,8 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        memory_config=config.tools.memory.model_dump(by_alias=True),
+        agent_id="default",
     )
 
     # Set cron callback (needs agent)
@@ -794,7 +796,7 @@ Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
-            agent.stop()
+            await agent.stop()
             await channels.stop_all()
 
     asyncio.run(run())
@@ -919,6 +921,8 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        memory_config=config.tools.memory.model_dump(by_alias=True),
+        agent_id="default",
     )
 
     # Shared reference for progress callbacks
@@ -1081,7 +1085,7 @@ def agent(
                         console.print("\nGoodbye!")
                         break
             finally:
-                agent_loop.stop()
+                await agent_loop.stop()
                 outbound_task.cancel()
                 await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
                 await agent_loop.close_mcp()
@@ -1451,6 +1455,74 @@ def _login_github_copilot() -> None:
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
+
+
+# ============================================================================
+# Memory Commands
+# ============================================================================
+
+
+@app.command("memory")
+def memory(
+    status: bool = typer.Option(False, "--status", help="Show memory and dreaming status"),
+    dreaming: str = typer.Option(None, "--dreaming", help="Trigger dreaming phase: light, deep, or rem"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+):
+    """Memory management commands."""
+    config = load_config(workspace)
+
+    if status:
+        from nanobot.agent.memory import DreamingService, ShortTermRecallStore, PromotionTracker
+
+        recall_store = ShortTermRecallStore(config.workspace_path)
+        promotion_tracker = PromotionTracker(config.workspace_path)
+
+        console.print("[bold]Memory Status[/bold]")
+        console.print(f"  Short-term recalls: {len(recall_store._load())}")
+        console.print(f"  Promoted entries: {promotion_tracker.get_promoted_count()}")
+
+        if config.tools.memory.dreaming.enabled:
+            console.print(f"\n[bold]Dreaming Status[/bold]")
+            console.print(f"  Enabled: {config.tools.memory.dreaming.enabled}")
+            console.print(f"  Light phase: {config.tools.memory.dreaming.light.cron}")
+            console.print(f"  Deep phase: {config.tools.memory.dreaming.deep.cron}")
+            console.print(f"  REM phase: {config.tools.memory.dreaming.rem.cron}")
+        else:
+            console.print("\n[dim]Dreaming is disabled[/dim]")
+
+    elif dreaming:
+        console.print(f"[cyan]Running dreaming phase: {dreaming}[/cyan]")
+        
+        from nanobot.bus.queue import MessageBus
+        from nanobot.providers.registry import get_provider
+
+        provider, _ = get_provider(config)
+        if not provider:
+            console.print("[red]Error: No LLM provider configured[/red]")
+            raise typer.Exit(1)
+
+        from nanobot.session.manager import SessionManager
+        from nanobot.agent.memory.consolidator import MemoryConsolidator
+
+        sessions = SessionManager(config.workspace_path)
+
+        consolidator = MemoryConsolidator(
+            workspace=config.workspace_path,
+            provider=provider,
+            model=config.agents.defaults.model,
+            sessions=sessions,
+            context_window_tokens=config.agents.defaults.context_window_tokens,
+            build_messages=lambda **k: [],
+            get_tool_definitions=lambda: [],
+            max_completion_tokens=config.agents.defaults.max_tokens,
+            dreaming_config=config.tools.memory.dreaming.model_dump(by_alias=True),
+        )
+
+        async def run_phase():
+            results = await consolidator.run_dreaming(dreaming)
+            console.print(f"[green]Dreaming phase '{dreaming}' completed: {results}[/green]")
+
+        asyncio.run(run_phase())
 
 
 if __name__ == "__main__":

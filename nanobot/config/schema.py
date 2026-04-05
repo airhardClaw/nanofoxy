@@ -154,6 +154,126 @@ class PaperclipConfig(Base):
     default_assignee: str = ""  # Default assignee for new tasks
 
 
+class QMDPathConfig(Base):
+    """Configuration for an extra path to index with QMD."""
+
+    name: str = ""  # Collection name
+    path: str = ""  # Directory path (supports ~ expansion)
+    pattern: str = "**/*"  # Glob pattern for files to index
+
+
+class QMDSessionsConfig(Base):
+    """Configuration for session transcript indexing."""
+
+    enabled: bool = True  # Enable session indexing by default
+
+
+class QMDSearchScopeRule(Base):
+    """Search scope rule for QMD."""
+
+    action: Literal["allow", "deny"] = "deny"
+    match: dict[str, str] = Field(default_factory=dict)  # e.g. {"chatType": "direct"}
+
+
+class QMDSearchScope(Base):
+    """Search scope configuration for QMD."""
+
+    default: Literal["allow", "deny"] = "deny"
+    rules: list[QMDSearchScopeRule] = Field(default_factory=list)
+
+
+class QMDLimitsConfig(Base):
+    """Limits for QMD operations."""
+
+    timeout_ms: int = 4000  # Search timeout in milliseconds
+
+
+class QMDConfig(Base):
+    """QMD memory engine configuration."""
+
+    paths: list[QMDPathConfig] = Field(default_factory=list)  # Extra paths to index
+    sessions: QMDSessionsConfig = Field(default_factory=QMDSessionsConfig)
+    scope: QMDSearchScope = Field(default_factory=QMDSearchScope)
+    limits: QMDLimitsConfig = Field(default_factory=QMDLimitsConfig)
+    update_interval_seconds: int = 300  # Periodic update interval (default: 5 min)
+
+
+class MemoryConfig(Base):
+    """Memory system configuration."""
+
+    backend: Literal["builtin", "qmd"] = "builtin"  # Default to builtin, QMD is opt-in
+    qmd: QMDConfig = Field(default_factory=QMDConfig)
+    citations: Literal["auto", "on", "off"] = "auto"  # Include citations in search results
+    dreaming: "DreamingConfig" = Field(default_factory=lambda: DreamingConfig())  # Dreaming configuration
+
+
+class DreamingPhaseConfig(Base):
+    """Base configuration for a dreaming phase."""
+
+    enabled: bool = True
+    cron: str = ""  # Cron schedule
+    limit: int = 10  # Max entries to process per run
+    lookback_days: int = 2  # How many days to look back
+    sources: list[str] = Field(default_factory=list)  # Data sources to scan
+
+
+class DreamingLightConfig(DreamingPhaseConfig):
+    """Light phase configuration - organizes and stages candidates."""
+
+    cron: str = "0 */6 * * *"  # Every 6 hours
+    lookback_days: int = 2
+    limit: int = 100
+    dedupe_similarity: float = 0.9  # Jaccard threshold for dedup
+    sources: list[str] = Field(default_factory=lambda: ["daily", "sessions", "recall"])
+
+
+class DreamingDeepConfig(DreamingPhaseConfig):
+    """Deep phase configuration - promotes candidates to durable memory."""
+
+    cron: str = "0 3 * * *"  # Daily at 3 AM
+    lookback_days: int = 30
+    limit: int = 10
+    min_score: float = 0.8  # Minimum weighted score for promotion
+    min_recall_count: int = 3  # Minimum recall count threshold
+    min_unique_queries: int = 3  # Minimum distinct query count
+    recency_half_life_days: int = 14  # Days for recency score to halve
+    max_age_days: int = 30  # Max daily-note age for promotion
+    sources: list[str] = Field(default_factory=lambda: ["daily", "memory", "sessions", "logs", "recall"])
+    recovery: "DreamingRecoveryConfig" = Field(default_factory=lambda: DreamingRecoveryConfig())
+
+
+class DreamingRecoveryConfig(Base):
+    """Deep phase recovery configuration."""
+
+    enabled: bool = True
+    trigger_below_health: float = 0.35  # Health threshold to trigger recovery
+    lookback_days: int = 30
+    max_recovered_candidates: int = 20
+    min_recovery_confidence: float = 0.9
+    auto_write_min_confidence: float = 0.97
+
+
+class DreamingREMConfig(DreamingPhaseConfig):
+    """REM phase configuration - pattern detection and reflection."""
+
+    cron: str = "0 5 * * 0"  # Weekly, Sunday 5 AM
+    lookback_days: int = 7
+    limit: int = 10
+    min_pattern_strength: float = 0.75  # Minimum tag co-occurrence strength
+    sources: list[str] = Field(default_factory=lambda: ["memory", "daily", "deep"])
+
+
+class DreamingConfig(Base):
+    """Dreaming memory consolidation configuration."""
+
+    enabled: bool = True
+    timezone: str | None = None
+    verbose_logging: bool = False
+    light: DreamingLightConfig = Field(default_factory=DreamingLightConfig)
+    deep: DreamingDeepConfig = Field(default_factory=DreamingDeepConfig)
+    rem: DreamingREMConfig = Field(default_factory=DreamingREMConfig)
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
@@ -162,6 +282,7 @@ class ToolsConfig(Base):
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     paperclip: PaperclipConfig = Field(default_factory=PaperclipConfig)  # Paperclip integration
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
 
 
 class Config(BaseSettings):

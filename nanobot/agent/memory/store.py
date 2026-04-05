@@ -15,6 +15,7 @@ from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session, SessionManager
+    from nanobot.agent.memory.qmd_engine import QMDEngine
 
 
 _SAVE_MEMORY_TOOL = [
@@ -229,6 +230,22 @@ class MemoryStore:
                     results.append(f"[HISTORY] {line[:200]}")
         
         return results[:10]
+
+    async def search_with_qmd(
+        self,
+        query: str,
+        qmd_engine: "QMDEngine | None" = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Search using QMD engine or fallback to builtin."""
+        if qmd_engine and await qmd_engine.ensure_available():
+            return await qmd_engine.search(query, limit=limit)
+        
+        builtin_results = self.search_memory(query)
+        return [
+            {"collection": "builtin", "content": r, "source": "memory"}
+            for r in builtin_results
+        ]
 
     @staticmethod
     def _format_messages(messages: list[dict]) -> str:
