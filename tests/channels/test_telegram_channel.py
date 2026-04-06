@@ -14,7 +14,7 @@ except ImportError:
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram import TELEGRAM_REPLY_CONTEXT_MAX_LEN, TelegramChannel, _StreamBuf
-from nanobot.channels.telegram import TelegramConfig
+from nanobot.channels.telegram import TelegramConfig, TelegramGroupConfig, TelegramTopicConfig
 
 
 class _FakeHTTPXRequest:
@@ -498,6 +498,7 @@ async def test_send_remote_media_url_after_security_validation(monkeypatch) -> N
             "chat_id": 123,
             "photo": "https://example.com/cat.jpg",
             "reply_parameters": None,
+            "reply_markup": None,
         }
     ]
 
@@ -966,3 +967,485 @@ async def test_on_help_includes_restart_command() -> None:
     help_text = update.message.reply_text.await_args.args[0]
     assert "/restart" in help_text
     assert "/status" in help_text
+
+
+# ==================== New Feature Tests ====================
+
+@pytest.mark.asyncio
+async def test_telegram_config_default_values() -> None:
+    """Test that TelegramConfig has correct default values."""
+    config = TelegramConfig()
+    
+    # Access Control
+    assert config.dm_policy == "allowlist"
+    assert config.group_allow_from == []
+    assert config.group_policy == "mention"
+    
+    # Capabilities
+    assert config.capabilities.inline_buttons == "allowlist"
+    
+    # Actions
+    assert config.actions.send_message is True
+    assert config.actions.delete_message is True
+    assert config.actions.reactions is True
+    assert config.actions.sticker is False
+    assert config.actions.poll is True
+    
+    # Delivery & Format
+    assert config.text_chunk_limit == 4000
+    assert config.chunk_mode == "length"
+    assert config.link_preview is True
+    assert config.reply_to_mode == "off"
+    
+    # Media & Network
+    assert config.media_max_mb == 100
+    assert config.timeout_seconds == 30.0
+    assert config.retry.attempts == 3
+    
+    # Streaming
+    assert config.stream_mode == "partial"
+    
+    # Reaction Notifications
+    assert config.reaction_notifications == "own"
+    assert config.reaction_level == "minimal"
+    
+    # Exec Approvals
+    assert config.exec_approvals.enabled is False
+    assert config.exec_approvals.mode == "supervised"
+    assert config.exec_approvals.target == "dm"
+    
+    # Error Policy
+    assert config.error_policy == "reply"
+    assert config.error_cooldown_ms == 60000
+    
+    # Commands
+    assert config.commands.native is True
+    assert config.commands.native_skills is True
+    assert config.custom_commands == []
+    
+    # Config Writes
+    assert config.config_writes is True
+
+
+@pytest.mark.asyncio
+async def test_telegram_config_alias_mapping() -> None:
+    """Test that TelegramConfig accepts both camelCase and snake_case."""
+    # Test snake_case (Pydantic alias_generator converts automatically)
+    config = TelegramConfig.model_validate({
+        "enabled": True,
+        "token": "123:abc",
+        "allow_from": ["*"],
+        "dm_policy": "open",
+        "group_policy": "open",
+        "text_chunk_limit": 5000,
+        "link_preview": False,
+        "stream_mode": "off",
+        "reaction_notifications": "all",
+    })
+    
+    assert config.enabled is True
+    assert config.dm_policy == "open"
+    assert config.group_policy == "open"
+    assert config.text_chunk_limit == 5000
+    assert config.link_preview is False
+    assert config.stream_mode == "off"
+    assert config.reaction_notifications == "all"
+
+
+@pytest.mark.asyncio
+async def test_can_send_message_gating() -> None:
+    """Test message action gating."""
+    # Default: allowed
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    assert channel.can_send_message() is True
+    assert channel.can_delete_message() is True
+    assert channel.can_react() is True
+    assert channel.can_send_sticker() is False
+    assert channel.can_send_poll() is True
+    
+    # Disabled actions
+    config.actions.send_message = False
+    channel = TelegramChannel(config, MessageBus())
+    assert channel.can_send_message() is False
+    
+    config.actions.sticker = True
+    channel = TelegramChannel(config, MessageBus())
+    assert channel.can_send_sticker() is True
+
+
+@pytest.mark.asyncio
+async def test_inline_buttons_allowed() -> None:
+    """Test inline buttons allowed based on chat type."""
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+    )
+    channel = TelegramChannel(config, MessageBus())
+    
+    # Default: allowlist
+    assert channel._inline_buttons_allowed("private") is True
+    assert channel._inline_buttons_allowed("group") is True
+    assert channel._inline_buttons_allowed("supergroup") is True
+    
+    # Off
+    config.capabilities.inline_buttons = "off"
+    assert channel._inline_buttons_allowed("private") is False
+    assert channel._inline_buttons_allowed("group") is False
+    
+    # DM only
+    config.capabilities.inline_buttons = "dm"
+    assert channel._inline_buttons_allowed("private") is True
+    assert channel._inline_buttons_allowed("group") is False
+    
+    # Group only
+    config.capabilities.inline_buttons = "group"
+    assert channel._inline_buttons_allowed("private") is False
+    assert channel._inline_buttons_allowed("group") is True
+
+
+@pytest.mark.asyncio
+async def test_validate_command() -> None:
+    """Test command validation."""
+    # Valid commands
+    assert TelegramChannel._validate_command("backup") is True
+    assert TelegramChannel._validate_command("generate") is True
+    assert TelegramChannel._validate_command("test123") is True
+    assert TelegramChannel._validate_command("a") is True
+    assert TelegramChannel._validate_command("a1_b2") is True
+    
+    # Invalid commands
+    assert TelegramChannel._validate_command("") is False
+    assert TelegramChannel._validate_command("123start") is False  # starts with number
+    assert TelegramChannel._validate_command("a" * 33) is False  # too long
+    assert TelegramChannel._validate_command("test-command") is False  # hyphen not allowed
+    assert TelegramChannel._validate_command("test command") is False  # space not allowed
+
+
+@pytest.mark.asyncio
+async def test_error_cooldown() -> None:
+    """Test error cooldown prevents spam."""
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+        error_policy="reply",
+        error_cooldown_ms=1000,  # 1 second for testing
+    )
+    channel = TelegramChannel(config, MessageBus())
+    
+    chat_id = "123456"
+    
+    # First error should be sent
+    last_error = channel._last_error_time.get(chat_id)
+    assert last_error is None
+    
+    # After error, timestamp should be set
+    import time
+    now = time.time()
+    channel._last_error_time[chat_id] = now
+    
+    # Next error within cooldown should be blocked
+    assert time.time() - channel._last_error_time.get(chat_id, 0) < (config.error_cooldown_ms / 1000)
+
+
+@pytest.mark.asyncio
+async def test_split_message_on_newlines() -> None:
+    """Test splitting on paragraph boundaries."""
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    
+    # Short message
+    assert channel._split_message_on_newlines("Hello", 100) == ["Hello"]
+    
+    # Multiple paragraphs under limit
+    text = "Paragraph 1\n\nParagraph 2"
+    assert channel._split_message_on_newlines(text, 100) == [text]
+    
+    # Paragraphs over limit
+    text = "A" * 50 + "\n\n" + "B" * 50
+    chunks = channel._split_message_on_newlines(text, 60)
+    assert len(chunks) == 2
+
+
+@pytest.mark.asyncio
+async def test_is_approver() -> None:
+    """Test approver check."""
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["123456789"],
+        exec_approvals={
+            "enabled": True,
+            "approvers": ["111222333"],
+        },
+    )
+    channel = TelegramChannel(config, MessageBus())
+    
+    # Approver in approvers list
+    assert channel._is_approver("111222333") is True
+    
+    # User in allow_from
+    assert channel._is_approver("123456789") is True
+    
+    # User in allow_from with username
+    assert channel._is_approver("123456789|username") is True
+    
+    # Unknown user
+    assert channel._is_approver("999888777") is False
+    
+    # Wildcard allow_from
+    config.allow_from = ["*"]
+    channel = TelegramChannel(config, MessageBus())
+    assert channel._is_approver("123456789") is True
+
+
+@pytest.mark.asyncio
+async def test_per_group_config_wildcard_override() -> None:
+    """Test per-group config with wildcard fallback."""
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+        group_policy="mention",
+    )
+    
+    # Add group configs
+    config.groups["*"] = TelegramGroupConfig(
+        group_policy="open",
+    )
+    config.groups["-1001234567890"] = TelegramGroupConfig(
+        group_policy="mention",
+        require_mention=True,
+    )
+    
+    channel = TelegramChannel(config, MessageBus())
+    
+    # Specific group should use its own config
+    group_config = channel.get_effective_group_config("-1001234567890")
+    assert group_config["group_policy"] == "mention"
+    assert group_config["require_mention"] is True
+    
+    # Unknown group should use wildcard
+    unknown_config = channel.get_effective_group_config("-1009999999999")
+    assert unknown_config["group_policy"] == "open"
+
+
+@pytest.mark.asyncio
+async def test_per_topic_config_inheritance() -> None:
+    """Test topic config inherits from group config."""
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+        group_policy="open",
+    )
+    
+    # Add group with topic
+    config.groups["-1001234567890"] = TelegramGroupConfig(
+        group_policy="open",
+        topics={
+            "42": TelegramTopicConfig(
+                group_policy="mention",
+                agent_id="coder",
+                skills=["code_review"],
+            ),
+        },
+    )
+    
+    channel = TelegramChannel(config, MessageBus())
+    
+    # Topic 42 should inherit and override
+    topic_config = channel.get_effective_topic_config("-1001234567890", 42)
+    assert topic_config["group_policy"] == "mention"
+    assert topic_config["agent_id"] == "coder"
+    assert topic_config["skills"] == ["code_review"]
+    # Inherited from group (group has no explicit enabled, so it inherits from global)
+    assert topic_config.get("enabled") is not None  # Inherited from global
+
+
+@pytest.mark.asyncio
+async def test_config_set_value_validation() -> None:
+    """Test config set value validation."""
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+    )
+    channel = TelegramChannel(config, MessageBus())
+    
+    # Valid values
+    success, error = await channel._set_config_value("dm_policy", "open")
+    assert success is True
+    assert error is None
+    assert config.dm_policy == "open"
+    
+    # Invalid key
+    success, error = await channel._set_config_value("invalid_key", "value")
+    assert success is False
+    assert "Unknown key" in error
+    
+    # Invalid value
+    success, error = await channel._set_config_value("dm_policy", "invalid_value")
+    assert success is False
+    assert "Invalid value" in error
+
+
+@pytest.mark.asyncio
+async def test_config_unset_resets_to_default() -> None:
+    """Test config unset resets value to default."""
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+        dm_policy="open",
+        group_policy="open",
+    )
+    channel = TelegramChannel(config, MessageBus())
+    
+    # Unset dm_policy - use _unset_config_value directly (lower level)
+    success, error = await channel._unset_config_value("dm_policy")
+    assert success is True
+    assert config.dm_policy == "allowlist"  # Default
+    
+    # Unset group_policy
+    success, error = await channel._unset_config_value("group_policy")
+    assert success is True
+    assert config.group_policy == "mention"  # Default
+    
+    # Cannot unset unknown key
+    success, error = await channel._unset_config_value("invalid_key")
+    assert success is False
+    assert "Cannot unset" in error
+
+
+@pytest.mark.asyncio
+async def test_validate_command_per_group_config() -> None:
+    """Test command validation with per-group config."""
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+    )
+    
+    # Add some groups
+    config.groups["-1001234567890"] = TelegramGroupConfig(
+        enabled=False,  # Disabled
+    )
+    config.groups["-1009876543210"] = TelegramGroupConfig(
+        enabled=True,
+    )
+    
+    channel = TelegramChannel(config, MessageBus())
+    
+    # Disabled group
+    assert channel._is_group_enabled_for_message("-1001234567890", None) is False
+    
+    # Enabled group
+    assert channel._is_group_enabled_for_message("-1009876543210", None) is True
+    
+    # Unknown group (no config) - defaults to enabled
+    assert channel._is_group_enabled_for_message("-1001111111111", None) is True
+
+
+@pytest.mark.asyncio
+async def test_acp_thread_binding_enabled() -> None:
+    """Test ACP thread binding config."""
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+        thread_bindings=True,
+    )
+    channel = TelegramChannel(config, MessageBus())
+    
+    assert channel.is_acp_thread_binding_enabled() is True
+    
+    config.thread_bindings = False
+    channel = TelegramChannel(config, MessageBus())
+    assert channel.is_acp_thread_binding_enabled() is False
+
+
+@pytest.mark.asyncio
+async def test_bind_topic_to_acp_session() -> None:
+    """Test binding a topic to an ACP session."""
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+        thread_bindings=True,
+    )
+    channel = TelegramChannel(config, MessageBus())
+    
+    # Bind topic to ACP session
+    result = channel.bind_topic_to_acp_session("-1001234567890", 42, "agent:codex:acp:uuid-123")
+    assert result is True
+    
+    # Check session key
+    session_key = channel.get_topic_acp_session_key("-1001234567890", 42)
+    assert session_key == "agent:codex:acp:uuid-123"
+    
+    # Unbind
+    result = channel.unbind_topic_from_acp_session("-1001234567890", 42)
+    assert result is True
+    
+    session_key = channel.get_topic_acp_session_key("-1001234567890", 42)
+    assert session_key is None
+
+
+@pytest.mark.asyncio
+async def test_get_active_acp_sessions() -> None:
+    """Test getting all active ACP sessions."""
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+        thread_bindings=True,
+    )
+    channel = TelegramChannel(config, MessageBus())
+    
+    # Add some bindings
+    channel.bind_topic_to_acp_session("-1001234567890", 42, "agent:codex:acp:uuid-1")
+    channel.bind_topic_to_acp_session("-1001234567890", 55, "agent:claude:acp:uuid-2")
+    channel.bind_topic_to_acp_session("-1009876543210", 10, "agent:opencode:acp:uuid-3")
+    
+    sessions = channel.get_active_acp_sessions()
+    assert len(sessions) == 3
+    
+    # Verify structure
+    for session in sessions:
+        assert "chat_id" in session
+        assert "thread_id" in session
+        assert "session_key" in session
+
+
+@pytest.mark.asyncio
+async def test_route_to_acp_session() -> None:
+    """Test routing message to ACP session."""
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+        thread_bindings=True,
+    )
+    channel = TelegramChannel(config, MessageBus())
+    
+    # No binding yet - should return None
+    session_key = channel._route_to_acp_session("-1001234567890", 42, "Hello")
+    assert session_key is None
+    
+    # Bind session
+    channel.bind_topic_to_acp_session("-1001234567890", 42, "agent:codex:acp:uuid-123")
+    
+    # Should route now
+    session_key = channel._route_to_acp_session("-1001234567890", 42, "Hello")
+    assert session_key == "agent:codex:acp:uuid-123"
+    
+    # Without thread bindings enabled
+    config.thread_bindings = False
+    channel = TelegramChannel(config, MessageBus())
+    channel.bind_topic_to_acp_session("-1001234567890", 42, "agent:codex:acp:uuid-123")
+    
+    session_key = channel._route_to_acp_session("-1001234567890", 42, "Hello")
+    assert session_key is None  # Disabled

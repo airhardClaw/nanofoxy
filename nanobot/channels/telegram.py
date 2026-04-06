@@ -13,9 +13,26 @@ from typing import Any, Literal
 
 from loguru import logger
 from pydantic import Field
-from telegram import Bot, BotCommand, ReactionTypeEmoji, ReplyParameters, Update
+from telegram import (
+    Bot,
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    ReactionTypeEmoji,
+    ReplyParameters,
+    Update,
+)
 from telegram.error import BadRequest, TimedOut
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    MessageReactionHandler,
+    filters,
+)
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
@@ -168,6 +185,74 @@ class _StreamBuf:
     stream_id: str | None = None
 
 
+class TelegramCapabilities(Base):
+    """Telegram capabilities configuration."""
+
+    inline_buttons: Literal["off", "dm", "group", "all", "allowlist"] = "allowlist"
+
+
+class TelegramActions(Base):
+    """Telegram message actions (tool gating)."""
+
+    send_message: bool = True
+    delete_message: bool = True
+    reactions: bool = True
+    sticker: bool = False
+    poll: bool = True
+
+
+class TelegramRetry(Base):
+    """Telegram retry configuration for send helpers."""
+
+    attempts: int = 3
+    min_delay_ms: int = 500
+    max_delay_ms: int = 5000
+    jitter: bool = True
+
+
+class TelegramCommands(Base):
+    """Telegram command configuration."""
+
+    native: bool = True
+    native_skills: bool = True
+
+
+class TelegramExecApprovals(Base):
+    """Telegram exec approvals configuration."""
+
+    enabled: bool = False
+    mode: Literal["supervised", "yolo"] = "supervised"
+    approvers: list[str] = Field(default_factory=list)
+    target: Literal["dm", "channel", "both"] = "dm"
+    agent_filter: str | None = None
+    session_filter: str | None = None
+
+
+class TelegramTopicConfig(Base):
+    """Per-topic Telegram configuration (inherits from group)."""
+
+    group_policy: Literal["open", "mention", "allowlist", "disabled"] | None = None
+    require_mention: bool | None = None
+    allow_from: list[str] | None = None
+    skills: list[str] | None = None
+    system_prompt: str | None = None
+    enabled: bool | None = None
+    agent_id: str | None = None
+    acp_session_key: str | None = None  # ACP session bound to this topic
+
+
+class TelegramGroupConfig(Base):
+    """Per-group Telegram configuration."""
+
+    group_policy: Literal["open", "mention", "allowlist", "disabled"] | None = None
+    require_mention: bool | None = None
+    allow_from: list[str] | None = None
+    skills: list[str] | None = None
+    system_prompt: str | None = None
+    enabled: bool | None = None
+    topics: dict[str, TelegramTopicConfig] = Field(default_factory=dict)
+
+
 class TelegramConfig(Base):
     """Telegram channel configuration."""
 
@@ -181,6 +266,52 @@ class TelegramConfig(Base):
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
+
+    # Access Control
+    dm_policy: Literal["allowlist", "open", "disabled"] = "allowlist"
+    group_allow_from: list[str] = Field(default_factory=list)
+
+    # Capabilities & Actions
+    capabilities: TelegramCapabilities = Field(default_factory=TelegramCapabilities)
+    actions: TelegramActions = Field(default_factory=TelegramActions)
+
+    # Delivery & Format
+    text_chunk_limit: int = 4000
+    chunk_mode: Literal["length", "newline"] = "length"
+    link_preview: bool = True
+    reply_to_mode: Literal["off", "first", "all"] = "off"
+
+    # Media & Network
+    media_max_mb: int = 100
+    timeout_seconds: float = 30.0
+    retry: TelegramRetry = Field(default_factory=TelegramRetry)
+
+    # Streaming (extended)
+    stream_mode: Literal["off", "partial", "block", "progress"] = "partial"
+
+    # Reaction Notifications
+    reaction_notifications: Literal["off", "own", "all"] = "own"
+    reaction_level: Literal["off", "ack", "minimal", "extensive"] = "minimal"
+
+    # Exec Approvals
+    exec_approvals: TelegramExecApprovals = Field(default_factory=TelegramExecApprovals)
+
+    # Error Policy
+    error_policy: Literal["reply", "silent"] = "reply"
+    error_cooldown_ms: int = 60000
+
+    # Commands
+    commands: TelegramCommands = Field(default_factory=TelegramCommands)
+    custom_commands: list[dict[str, str]] = Field(default_factory=list)
+
+    # Config Writes
+    config_writes: bool = True
+
+    # Per-group and per-topic overrides
+    groups: dict[str, TelegramGroupConfig] = Field(default_factory=dict)
+
+    # ACP Thread Bindings
+    thread_bindings: bool = False  # Enable ACP thread binding for topics
 
 
 class TelegramChannel(BaseChannel):
@@ -230,6 +361,9 @@ class TelegramChannel(BaseChannel):
         self._stream_bufs: dict[str, _StreamBuf] = {}  # chat_id -> streaming state
         self._subagent_configs: dict[str, dict] = {}
         self._subagent_apps: dict[str, "Application"] = {}  # subagent_id -> Application (for polling)
+        self._last_error_time: dict[str, float] = {}  # chat_id -> last error timestamp
+        self._pending_approvals: dict[str, dict] = {}  # request_id -> approval request data
+        self._exec_approval_cleanup_task: asyncio.Task | None = None
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -287,6 +421,9 @@ class TelegramChannel(BaseChannel):
         # Load subagent configurations and initialize subagent bots
         await self._init_subagent_bots()
 
+        # Load config overrides from file
+        await self._load_config_overrides()
+
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
@@ -295,6 +432,24 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("status", self._forward_command))
         self._app.add_handler(CommandHandler("skills", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
+
+        # Add config commands if enabled
+        if self.config.config_writes:
+            self._app.add_handler(CommandHandler("config", self._on_config))
+
+        # Add exec approval commands if enabled
+        if self.config.exec_approvals.enabled and self.config.exec_approvals.mode == "supervised":
+            self._app.add_handler(CommandHandler("approve", self._on_approve))
+            self._app.add_handler(CommandHandler("deny", self._on_deny))
+            # Start approval cleanup task
+            self._exec_approval_cleanup_task = asyncio.create_task(self._cleanup_expired_approvals())
+
+        # Add callback query handler for inline buttons
+        self._app.add_handler(CallbackQueryHandler(self._on_callback_query))
+
+        # Add message reaction handler if enabled
+        if self.config.reaction_notifications != "off":
+            self._app.add_handler(MessageReactionHandler(self._on_message_reaction))
 
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
@@ -317,15 +472,16 @@ class TelegramChannel(BaseChannel):
         self._bot_username = getattr(bot_info, "username", None)
         logger.info("Telegram bot @{} connected", bot_info.username)
 
-        try:
-            await self._app.bot.set_my_commands(self.BOT_COMMANDS)
-            logger.debug("Telegram bot commands registered")
-        except Exception as e:
-            logger.warning("Failed to register bot commands: {}", e)
+        # Register commands (native + custom)
+        await self._register_commands()
 
-        # Start polling (this runs until stopped)
+        # Start polling with appropriate allowed_updates
+        allowed_updates = ["message"]
+        if self.config.reaction_notifications != "off":
+            allowed_updates.append("message_reaction")
+
         await self._app.updater.start_polling(
-            allowed_updates=["message"],
+            allowed_updates=allowed_updates,
             drop_pending_updates=True  # Ignore old messages on startup
         )
 
@@ -345,6 +501,11 @@ class TelegramChannel(BaseChannel):
             task.cancel()
         self._media_group_tasks.clear()
         self._media_group_buffers.clear()
+
+        # Cancel exec approval cleanup task
+        if self._exec_approval_cleanup_task:
+            self._exec_approval_cleanup_task.cancel()
+            self._exec_approval_cleanup_task = None
 
         if self._app:
             logger.info("Stopping Telegram bot...")
@@ -690,6 +851,11 @@ class TelegramChannel(BaseChannel):
         logger.debug("TelegramChannel.send() called: chat_id={}, from_subagent={}, subagent_id={}", 
             msg.chat_id, msg.metadata.get("_from_subagent"), msg.metadata.get("_subagent_id"))
         
+        # Check if sending messages is allowed
+        if not self.can_send_message():
+            logger.warning("Sending messages is disabled in config")
+            return
+        
         # Determine which bot to use: subagent or chief
         bot = self._app.bot  # Default: chief bot
         
@@ -734,21 +900,55 @@ class TelegramChannel(BaseChannel):
         message_thread_id = msg.metadata.get("message_thread_id")
         if message_thread_id is None and reply_to_message_id is not None:
             message_thread_id = self._message_threads.get((msg.chat_id, reply_to_message_id))
+        
+        # Handle reply_to_mode
         thread_kwargs = {}
         if message_thread_id is not None:
             thread_kwargs["message_thread_id"] = message_thread_id
-
+            
+        # Determine reply parameters based on reply_to_mode
         reply_params = None
-        if self.config.reply_to_message:
+        if self.config.reply_to_message or self.config.reply_to_mode != "off":
             if reply_to_message_id:
                 reply_params = ReplyParameters(
                     message_id=reply_to_message_id,
                     allow_sending_without_reply=True
                 )
 
+        # Build inline keyboard if buttons are provided
+        reply_markup = None
+        if msg.buttons:
+            keyboard = []
+            for row in msg.buttons:
+                button_row = []
+                for button in row:
+                    if isinstance(button, dict):
+                        button_row.append(InlineKeyboardButton(
+                            text=button.get("text", ""),
+                            callback_data=button.get("callback_data") or button.get("data", "")
+                        ))
+                    else:
+                        # Assume simple string, convert to button
+                        button_row.append(InlineKeyboardButton(text=str(button), callback_data=str(button)))
+                keyboard.append(button_row)
+            if keyboard:
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
         # Send media files
         for media_path in (msg.media or []):
             try:
+                # Check media size limit
+                media_size = 0
+                if not self._is_remote_media_url(media_path):
+                    try:
+                        media_size = Path(media_path).stat().st_size
+                    except Exception:
+                        pass
+                
+                if media_size > self.config.media_max_mb * 1024 * 1024:
+                    logger.warning("Media too large ({}MB limit): {}", self.config.media_max_mb, media_path)
+                    continue
+                
                 media_type = self._get_media_type(media_path)
                 sender = {
                     "photo": bot.send_photo,
@@ -767,6 +967,7 @@ class TelegramChannel(BaseChannel):
                         chat_id=chat_id,
                         **{param: media_path},
                         reply_parameters=reply_params,
+                        reply_markup=reply_markup,
                         **thread_kwargs,
                     )
                     continue
@@ -776,22 +977,42 @@ class TelegramChannel(BaseChannel):
                         chat_id=chat_id,
                         **{param: f},
                         reply_parameters=reply_params,
+                        reply_markup=reply_markup,
                         **thread_kwargs,
                     )
+                # Clear reply_markup after first media send (only show buttons on first message)
+                reply_markup = None
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
                 logger.error("Failed to send media {}: {}", media_path, e)
-                await self._app.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"[Failed to send: {filename}]",
-                    reply_parameters=reply_params,
-                    **thread_kwargs,
-                )
+                try:
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=f"[Failed to send: {filename}]",
+                        reply_parameters=reply_params,
+                        **thread_kwargs,
+                    )
+                except Exception as e2:
+                    logger.error("Failed to send error notification: {}", e2)
 
-        # Send text content
+        # Send text content with chunking based on chunk_mode
         if msg.content and msg.content != "[empty message]":
-            for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                await self._send_text(bot, chat_id, chunk, reply_params, thread_kwargs)
+            if self.config.chunk_mode == "newline":
+                chunks = self._split_message_on_newlines(msg.content, self.config.text_chunk_limit)
+            else:
+                chunks = split_message(msg.content, self.config.text_chunk_limit)
+            
+            for i, chunk in enumerate(chunks):
+                # Only add reply_markup to first chunk
+                chunk_reply_markup = reply_markup if i == 0 else None
+                try:
+                    await self._send_text(
+                        bot, chat_id, chunk, reply_params, thread_kwargs,
+                        reply_markup=chunk_reply_markup
+                    )
+                except Exception as e:
+                    await self._handle_send_error(str(chat_id), e)
+                    raise
 
     async def _send_text(
         self,
@@ -800,6 +1021,7 @@ class TelegramChannel(BaseChannel):
         text: str,
         reply_params=None,
         thread_kwargs: dict | None = None,
+        reply_markup=None,
     ) -> None:
         """Send a plain text message with HTML fallback."""
         
@@ -821,6 +1043,8 @@ class TelegramChannel(BaseChannel):
                 bot.send_message,
                 chat_id=chat_id, text=html, parse_mode="HTML",
                 reply_parameters=reply_params,
+                reply_markup=reply_markup,
+                disable_web_page_preview=not self.config.link_preview,
                 **(thread_kwargs or {}),
             )
         except Exception as e:
@@ -831,6 +1055,7 @@ class TelegramChannel(BaseChannel):
                     chat_id=chat_id,
                     text=text,
                     reply_parameters=reply_params,
+                    reply_markup=reply_markup,
                     **(thread_kwargs or {}),
                 )
             except Exception as e2:
@@ -954,7 +1179,9 @@ class TelegramChannel(BaseChannel):
         """Handle /help command, bypassing ACL so all users can access it."""
         if not update.message:
             return
-        await update.message.reply_text(
+        
+        # Build help text based on enabled features
+        help_text = (
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
@@ -964,6 +1191,16 @@ class TelegramChannel(BaseChannel):
             "$<name> — Activate a skill inline (e.g. $weather what's the forecast)\n"
             "/help — Show available commands"
         )
+        
+        # Add config commands if enabled
+        if self.config.config_writes:
+            help_text += "\n/config — View or modify config"
+        
+        # Add exec approval commands if enabled
+        if self.config.exec_approvals.enabled and self.config.exec_approvals.mode == "supervised":
+            help_text += "\n/approve <id> — Approve exec request\n/deny <id> — Deny exec request"
+        
+        await update.message.reply_text(help_text)
 
     @staticmethod
     def _sender_id(user) -> str:
@@ -1340,6 +1577,884 @@ class TelegramChannel(BaseChannel):
             logger.warning("Telegram network issue: {}", str(context.error))
         else:
             logger.error("Telegram error: {}", context.error)
+
+    # ==================== Inline Buttons ====================
+
+    async def _on_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle inline button callback queries."""
+        query = update.callback_query
+        if not query or not query.from_user or not query.message:
+            return
+
+        # Answer the callback query immediately (required by Telegram)
+        try:
+            await query.answer()
+        except Exception as e:
+            logger.debug("Callback query answer failed: {}", e)
+
+        # Check if inline buttons are allowed for this chat
+        chat_type = query.message.chat.type
+        if not self._inline_buttons_allowed(chat_type):
+            await query.edit_message_text("❌ Inline buttons not allowed in this chat.")
+            return
+
+        # Forward callback data as text to agent
+        sender_id = self._sender_id(query.from_user)
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=str(query.message.chat_id),
+            content=f"[callback: {query.data}]",
+            metadata={
+                "callback_data": query.data,
+                "message_id": query.message.message_id,
+                "chat_type": chat_type,
+            },
+        )
+
+    def _inline_buttons_allowed(self, chat_type: str) -> bool:
+        """Check if inline buttons are allowed for the given chat type."""
+        mode = self.config.capabilities.inline_buttons
+        if mode == "off":
+            return False
+        if mode == "all":
+            return True
+        if mode == "dm" and chat_type == "private":
+            return True
+        if mode == "group" and chat_type in ("group", "supergroup"):
+            return True
+        # "allowlist" - for now allow all (could be extended with explicit chat IDs)
+        return mode == "allowlist"
+
+    # ==================== Reaction Notifications ====================
+
+    async def _on_message_reaction(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle message reaction updates."""
+        reaction = update.message_reaction
+        if not reaction:
+            return
+
+        chat = reaction.chat
+        if not chat:
+            return
+
+        # Check reaction_notifications setting
+        if self.config.reaction_notifications == "off":
+            return
+
+        # Get the user who reacted
+        user = reaction.user
+        if not user:
+            return
+
+        # For "own" mode, only notify on reactions to bot's messages
+        if self.config.reaction_notifications == "own":
+            # We need to track which messages were sent by the bot
+            # For now, skip this check (could be implemented with sent message cache)
+            pass
+
+        # Get reaction emoji
+        emoji = ""
+        if reaction.new_reaction:
+            for reaction_type in reaction.new_reaction:
+                if isinstance(reaction_type, ReactionTypeEmoji):
+                    emoji = reaction_type.emoji
+                    break
+
+        if not emoji:
+            return
+
+        # Build notification content based on reaction_level
+        if self.config.reaction_level == "off":
+            return
+        elif self.config.reaction_level == "ack":
+            # Minimal acknowledgment, no message to agent
+            return
+        elif self.config.reaction_level == "minimal":
+            content = f"👍 {emoji}"
+        elif self.config.reaction_level == "extensive":
+            username = user.username or user.first_name or "Unknown"
+            content = f"Telegram reaction added: {emoji} by @{username} on msg {reaction.message_id}"
+        else:
+            content = f"Reaction: {emoji}"
+
+        # Send notification to agent
+        sender_id = self._sender_id(user)
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=str(chat.id),
+            content=f"[reaction: {content}]",
+            metadata={
+                "message_id": reaction.message_id,
+                "reaction_emoji": emoji,
+                "is_reaction": True,
+            },
+        )
+
+    # ==================== Exec Approvals ====================
+
+    async def _on_approve(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /approve command."""
+        if not update.message or not update.effective_user:
+            return
+
+        user = update.effective_user
+        sender_id = str(user.id)
+
+        # Check if user is an approver
+        if not self._is_approver(sender_id):
+            await update.message.reply_text("❌ You are not authorized to approve requests.")
+            return
+
+        # Parse request ID from command args or reply
+        request_id = self._parse_approval_args(context.args, update.message.reply_to_message)
+
+        if not request_id:
+            await update.message.reply_text(
+                "Usage: /approve <request_id> or reply to an approval message with /approve"
+            )
+            return
+
+        # Process the approval
+        await self._process_approval(request_id, approved=True, approver_id=sender_id)
+
+        await update.message.reply_text(f"✅ Request {request_id} approved.")
+
+        # Send notification to channel if target is "both" or "channel"
+        if self.config.exec_approvals.target in ("both", "channel"):
+            try:
+                await self._app.bot.send_message(
+                    chat_id=update.message.chat_id,
+                    text=f"✅ Request {request_id} approved by @{user.username or user.first_name}.",
+                )
+            except Exception as e:
+                logger.warning("Failed to send approval notification to channel: {}", e)
+
+    async def _on_deny(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /deny command."""
+        if not update.message or not update.effective_user:
+            return
+
+        user = update.effective_user
+        sender_id = str(user.id)
+
+        # Check if user is an approver
+        if not self._is_approver(sender_id):
+            await update.message.reply_text("❌ You are not authorized to deny requests.")
+            return
+
+        # Parse request ID from command args or reply
+        request_id = self._parse_approval_args(context.args, update.message.reply_to_message)
+
+        if not request_id:
+            await update.message.reply_text(
+                "Usage: /deny <request_id> or reply to an approval message with /deny"
+            )
+            return
+
+        # Process the denial
+        await self._process_approval(request_id, approved=False, approver_id=sender_id)
+
+        await update.message.reply_text(f"❌ Request {request_id} denied.")
+
+        # Send notification to channel if target is "both" or "channel"
+        if self.config.exec_approvals.target in ("both", "channel"):
+            try:
+                await self._app.bot.send_message(
+                    chat_id=update.message.chat_id,
+                    text=f"❌ Request {request_id} denied by @{user.username or user.first_name}.",
+                )
+            except Exception as e:
+                logger.warning("Failed to send denial notification to channel: {}", e)
+
+    def _is_approver(self, sender_id: str) -> bool:
+        """Check if sender is an authorized approver."""
+        # Clean sender_id (remove username part if present)
+        sender_id_clean = sender_id.split("|")[0] if "|" in sender_id else sender_id
+
+        # Check against configured approvers
+        for approver in self.config.exec_approvals.approvers:
+            if approver == sender_id_clean:
+                return True
+
+        # Also allow if sender is in allow_from (for single-owner bots)
+        for allowed in self.config.allow_from:
+            if allowed == sender_id_clean or allowed == "*":
+                return True
+
+        return False
+
+    def _parse_approval_args(self, args: list[str], reply_to_message: Message | None) -> str | None:
+        """Parse request ID from command arguments or reply."""
+        # Try args first
+        if args and args[0]:
+            return args[0]
+
+        # Try reply to message
+        if reply_to_message and reply_to_message.text:
+            # Extract request ID from approval message (format: "Request: XXX" or similar)
+            import re
+            match = re.search(r'(?:Request[:\s]+)?([a-zA-Z0-9_-]+)', reply_to_message.text)
+            if match:
+                return match.group(1)
+
+        return None
+
+    async def _process_approval(self, request_id: str, approved: bool, approver_id: str) -> None:
+        """Process an approval or denial."""
+        # Remove from pending approvals
+        if request_id in self._pending_approvals:
+            approval = self._pending_approvals.pop(request_id)
+
+            # Send approval result to the agent system via message bus
+            # This would integrate with the exec approval system
+            content = f"[exec_approval] {request_id} {'approved' if approved else 'denied'} by {approver_id}"
+            await self._handle_message(
+                sender_id=approver_id,
+                chat_id=approval.get("chat_id", ""),
+                content=content,
+                metadata={
+                    "_exec_approval": True,
+                    "request_id": request_id,
+                    "approved": approved,
+                    "approver_id": approver_id,
+                },
+            )
+
+    async def _cleanup_expired_approvals(self) -> None:
+        """Periodically clean up expired approval requests."""
+        while self._running:
+            try:
+                await asyncio.sleep(60)  # Check every minute
+                now = time.time()
+                expired = [
+                    req_id for req_id, data in self._pending_approvals.items()
+                    if now - data.get("created_at", 0) > 1800  # 30 minutes
+                ]
+                for req_id in expired:
+                    self._pending_approvals.pop(req_id, None)
+                    logger.info("Expired approval request: {}", req_id)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning("Approval cleanup error: {}", e)
+
+    def add_pending_approval(self, request_id: str, chat_id: str, content: str) -> None:
+        """Add a pending approval request."""
+        self._pending_approvals[request_id] = {
+            "chat_id": chat_id,
+            "content": content,
+            "created_at": time.time(),
+        }
+
+    # ==================== Config Writes ====================
+
+    async def _on_config(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /config command for viewing and modifying config."""
+        if not update.message:
+            return
+
+        # Check if sender is authorized (approver or owner)
+        user = update.effective_user
+        sender_id = str(user.id)
+        
+        # Allow if user is in allow_from or is an approver
+        is_authorized = self._is_approver(sender_id) or sender_id in self.config.allow_from
+        if not is_authorized and "*" not in self.config.allow_from:
+            await update.message.reply_text("❌ You are not authorized to use config commands.")
+            return
+
+        args = context.args
+        if not args:
+            # Show current config
+            await self._show_config(update.message)
+            return
+
+        subcommand = args[0].lower() if args else ""
+        
+        if subcommand == "set":
+            await self._config_set(update.message, args[1:])
+        elif subcommand == "unset":
+            await self._config_unset(update.message, args[1:])
+        elif subcommand == "show":
+            await self._show_config(update.message)
+        elif subcommand == "list":
+            await self._show_config(update.message)
+        else:
+            await update.message.reply_text(
+                "Usage:\n"
+                "/config show - Show current config\n"
+                "/config set <key> <value> - Set a config value\n"
+                "/config unset <key> - Remove a config value"
+            )
+
+    async def _show_config(self, message) -> None:
+        """Show current Telegram config."""
+        lines = ["📋 Telegram Config:", ""]
+        
+        # Show key settings
+        lines.append(f"• dm_policy: {self.config.dm_policy}")
+        lines.append(f"• group_policy: {self.config.group_policy}")
+        lines.append(f"• stream_mode: {self.config.stream_mode}")
+        lines.append(f"• reaction_notifications: {self.config.reaction_notifications}")
+        lines.append(f"• reaction_level: {self.config.reaction_level}")
+        lines.append(f"• link_preview: {self.config.link_preview}")
+        lines.append(f"• text_chunk_limit: {self.config.text_chunk_limit}")
+        lines.append(f"• chunk_mode: {self.config.chunk_mode}")
+        
+        if self.config.groups:
+            lines.append("")
+            lines.append(f"• groups configured: {len(self.config.groups)}")
+        
+        await message.reply_text("\n".join(lines))
+
+    async def _config_set(self, message, args: list[str]) -> None:
+        """Set a config value."""
+        if len(args) < 2:
+            await message.reply_text("Usage: /config set <key> <value>")
+            return
+
+        key = args[0]
+        value = args[1]
+        
+        # Validate and set the value
+        success, error = await self._set_config_value(key, value)
+        
+        if success:
+            await message.reply_text(f"✅ Set {key} = {value}")
+            # Persist to file
+            await self._persist_config()
+        else:
+            await message.reply_text(f"❌ Error: {error}")
+
+    async def _config_unset(self, message, args: list[str]) -> None:
+        """Unset a config value."""
+        if not args:
+            await message.reply_text("Usage: /config unset <key>")
+            return
+
+        key = args[0]
+        success, error = await self._unset_config_value(key)
+        
+        if success:
+            await message.reply_text(f"✅ Removed {key}")
+            await self._persist_config()
+        else:
+            await message.reply_text(f"❌ Error: {error}")
+
+    async def _set_config_value(self, key: str, value: str) -> tuple[bool, str | None]:
+        """Validate and set a config value."""
+        # Map of allowed keys and their types
+        allowed_keys = {
+            "dm_policy": ["allowlist", "open", "disabled"],
+            "group_policy": ["open", "mention", "allowlist", "disabled"],
+            "stream_mode": ["off", "partial", "block", "progress"],
+            "reaction_notifications": ["off", "own", "all"],
+            "reaction_level": ["off", "ack", "minimal", "extensive"],
+            "link_preview": ["true", "false"],
+            "reply_to_mode": ["off", "first", "all"],
+            "chunk_mode": ["length", "newline"],
+            "error_policy": ["reply", "silent"],
+        }
+        
+        if key not in allowed_keys:
+            return False, f"Unknown key: {key}. Allowed: {', '.join(allowed_keys.keys())}"
+        
+        # Check if value is valid for this key
+        valid_values = allowed_keys[key]
+        if value not in valid_values:
+            return False, f"Invalid value for {key}. Allowed: {', '.join(valid_values)}"
+        
+        # Set the value
+        if hasattr(self.config, key):
+            setattr(self.config, key, value)
+            return True, None
+        
+        return False, f"Key {key} not found in config"
+
+    async def _unset_config_value(self, key: str) -> tuple[bool, str | None]:
+        """Unset a config value (reset to default)."""
+        # Keys that can be unset (reset to default)
+        reset_to_default = {
+            "dm_policy": "allowlist",
+            "group_policy": "mention",
+            "stream_mode": "partial",
+            "reaction_notifications": "own",
+            "reaction_level": "minimal",
+            "link_preview": True,
+            "reply_to_mode": "off",
+            "chunk_mode": "length",
+            "error_policy": "reply",
+        }
+        
+        if key not in reset_to_default:
+            return False, f"Cannot unset {key}"
+        
+        if hasattr(self.config, key):
+            default = reset_to_default[key]
+            setattr(self.config, key, default)
+            return True, None
+        
+        return False, f"Key {key} not found"
+
+    async def _persist_config(self) -> None:
+        """Persist config to .nanobot/telegram-config.json."""
+        if not self.workspace:
+            logger.debug("No workspace, skipping config persistence")
+            return
+        
+        config_file = self.workspace.parent / "telegram-config.json"
+        
+        # Load existing overrides
+        overrides = {}
+        if config_file.exists():
+            try:
+                overrides = json.loads(config_file.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                overrides = {}
+        
+        # Update with current config values
+        overrides["dm_policy"] = self.config.dm_policy
+        overrides["group_policy"] = self.config.group_policy
+        overrides["stream_mode"] = self.config.stream_mode
+        overrides["reaction_notifications"] = self.config.reaction_notifications
+        overrides["reaction_level"] = self.config.reaction_level
+        overrides["link_preview"] = self.config.link_preview
+        overrides["text_chunk_limit"] = self.config.text_chunk_limit
+        overrides["chunk_mode"] = self.config.chunk_mode
+        overrides["reply_to_mode"] = self.config.reply_to_mode
+        overrides["error_policy"] = self.config.error_policy
+        overrides["groups"] = {k: v.model_dump() for k, v in self.config.groups.items()}
+        
+        # Write to file
+        try:
+            config_file.write_text(json.dumps(overrides, indent=2, ensure_ascii=False), encoding="utf-8")
+            logger.info("Config persisted to {}", config_file)
+        except Exception as e:
+            logger.warning("Failed to persist config: {}", e)
+
+    async def _load_config_overrides(self) -> None:
+        """Load config overrides from .nanobot/telegram-config.json."""
+        if not self.workspace:
+            return
+        
+        config_file = self.workspace.parent / "telegram-config.json"
+        
+        if not config_file.exists():
+            return
+        
+        try:
+            overrides = json.loads(config_file.read_text(encoding="utf-8"))
+            
+            # Apply overrides
+            for key, value in overrides.items():
+                if key == "groups":
+                    # Load group configs
+                    for group_id, group_data in value.items():
+                        if group_id not in self.config.groups:
+                            self.config.groups[group_id] = TelegramGroupConfig.model_validate(group_data)
+                elif hasattr(self.config, key):
+                    setattr(self.config, key, value)
+            
+            logger.info("Loaded config overrides from {}", config_file)
+        except Exception as e:
+            logger.warning("Failed to load config overrides: {}", e)
+
+    def _handle_group_migration(self, old_chat_id: str, new_chat_id: str) -> None:
+        """Handle group migration (supergroup upgrade)."""
+        # If old chat_id is in groups, update to new chat_id
+        if old_chat_id in self.config.groups:
+            group_config = self.config.groups.pop(old_chat_id)
+            self.config.groups[new_chat_id] = group_config
+            logger.info("Migrated group config from {} to {}", old_chat_id, new_chat_id)
+
+    # ==================== Custom Commands ====================
+
+    async def _register_commands(self) -> None:
+        """Register bot commands (native + custom)."""
+        all_commands = []
+
+        # Add native commands if enabled
+        if self.config.commands.native:
+            all_commands.extend(self.BOT_COMMANDS)
+
+        # Add custom commands
+        if self.config.custom_commands:
+            native_command_names = {cmd.command for cmd in self.BOT_COMMANDS}
+            for cmd in self.config.custom_commands:
+                command = cmd.get("command", "").lower().strip()
+                description = cmd.get("description", "")
+
+                # Validate command name
+                if not self._validate_command(command):
+                    logger.warning("Invalid custom command: {}", command)
+                    continue
+
+                # Skip if conflicts with native commands
+                if command in native_command_names:
+                    logger.debug("Skipping custom command {} (conflicts with native)", command)
+                    continue
+
+                # Skip duplicates
+                if any(c.command == command for c in all_commands):
+                    logger.debug("Skipping duplicate custom command: {}", command)
+                    continue
+
+                all_commands.append(BotCommand(command, description))
+
+        try:
+            await self._app.bot.set_my_commands(all_commands)
+            logger.debug("Telegram bot commands registered ({} total)", len(all_commands))
+        except Exception as e:
+            logger.warning("Failed to register bot commands: {}", e)
+
+    @staticmethod
+    def _validate_command(command: str) -> bool:
+        """Validate command name (a-z, 0-9, _, length 1-32)."""
+        return bool(re.match(r'^[a-z][a-z0-9_]{0,31}$', command))
+
+    # ==================== Error Policy ====================
+
+    async def _handle_send_error(self, chat_id: str, error: Exception) -> None:
+        """Handle send errors based on error policy."""
+        if not self._app:
+            return
+
+        if self.config.error_policy == "silent":
+            return
+
+        # Check cooldown
+        last_error = self._last_error_time.get(chat_id, 0)
+        cooldown_seconds = self.config.error_cooldown_ms / 1000
+        if time.time() - last_error < cooldown_seconds:
+            return
+
+        self._last_error_time[chat_id] = time.time()
+
+        # Send friendly error message
+        error_msg = f"⚠️ Error: {self._get_error_message(error)}"
+        try:
+            await self._app.bot.send_message(chat_id=int(chat_id), text=error_msg)
+        except Exception as e:
+            logger.warning("Failed to send error message: {}", e)
+
+    @staticmethod
+    def _get_error_message(error: Exception) -> str:
+        """Get user-friendly error message."""
+        error_str = str(error).lower()
+
+        if "timeout" in error_str:
+            return "Request timed out. Please try again."
+        elif "network" in error_str:
+            return "Network error. Please check your connection."
+        elif "forbidden" in error_str:
+            return "Access denied."
+        elif "not found" in error_str:
+            return "Resource not found."
+        else:
+            return "An error occurred. Please try again later."
+
+    # ==================== Message Actions Gating ====================
+
+    def can_send_message(self) -> bool:
+        """Check if sending messages is allowed."""
+        return self.config.actions.send_message
+
+    def can_delete_message(self) -> bool:
+        """Check if deleting messages is allowed."""
+        return self.config.actions.delete_message
+
+    def can_react(self) -> bool:
+        """Check if reactions are allowed."""
+        return self.config.actions.reactions
+
+    def can_send_sticker(self) -> bool:
+        """Check if sending stickers is allowed."""
+        return self.config.actions.sticker
+
+    def can_send_poll(self) -> bool:
+        """Check if sending polls is allowed."""
+        return self.config.actions.poll
+
+    # ==================== Direct Telegram Actions ====================
+
+    async def telegram_delete_message(self, chat_id: str, message_id: int) -> bool:
+        """Delete a message via Telegram bot."""
+        if not self.can_delete_message():
+            logger.warning("Delete message action is disabled")
+            return False
+        if not self._app:
+            logger.warning("Telegram bot not running")
+            return False
+        try:
+            await self._app.bot.delete_message(chat_id=int(chat_id), message_id=message_id)
+            logger.info("Deleted message {} in chat {}", message_id, chat_id)
+            return True
+        except Exception as e:
+            logger.error("Failed to delete message: {}", e)
+            return False
+
+    async def telegram_send_sticker(self, chat_id: str, file_id: str) -> bool:
+        """Send a sticker via Telegram bot."""
+        if not self.can_send_sticker():
+            logger.warning("Sticker action is disabled")
+            return False
+        if not self._app:
+            logger.warning("Telegram bot not running")
+            return False
+        try:
+            await self._app.bot.send_sticker(chat_id=int(chat_id), sticker=file_id)
+            logger.info("Sent sticker to chat {}", chat_id)
+            return True
+        except Exception as e:
+            logger.error("Failed to send sticker: {}", e)
+            return False
+
+    async def telegram_send_poll(
+        self,
+        chat_id: str,
+        question: str,
+        options: list[str],
+        *,
+        anonymous: bool = True,
+        multiple_choice: bool = False,
+        duration: int = 60,
+    ) -> bool:
+        """Send a poll via Telegram bot."""
+        if not self.can_send_poll():
+            logger.warning("Poll action is disabled")
+            return False
+        if not self._app:
+            logger.warning("Telegram bot not running")
+            return False
+        try:
+            await self._app.bot.send_poll(
+                chat_id=int(chat_id),
+                question=question,
+                options=options,
+                is_anonymous=anonymous,
+                allows_multiple_answers=multiple_choice,
+                open_period=duration,
+            )
+            logger.info("Sent poll to chat {}", chat_id)
+            return True
+        except Exception as e:
+            logger.error("Failed to send poll: {}", e)
+            return False
+
+    # ==================== Per-group/topic Config ====================
+
+    def get_effective_group_config(self, chat_id: str) -> dict[str, Any]:
+        """Get effective group config with inheritance: global -> wildcard -> specific."""
+        result = {}
+
+        # Start with global config
+        for key in ["group_policy", "require_mention", "allow_from", "skills", "system_prompt", "enabled"]:
+            val = getattr(self.config, key, None)
+            if val is not None:
+                result[key] = val
+
+        # Apply wildcard group config if exists
+        if "*" in self.config.groups:
+            wildcard = self.config.groups["*"]
+            for key in ["group_policy", "require_mention", "allow_from", "skills", "system_prompt", "enabled"]:
+                val = getattr(wildcard, key, None)
+                if val is not None:
+                    result[key] = val
+
+        # Apply specific group config (overrides wildcard)
+        if chat_id in self.config.groups:
+            specific = self.config.groups[chat_id]
+            for key in ["group_policy", "require_mention", "allow_from", "skills", "system_prompt", "enabled"]:
+                val = getattr(specific, key, None)
+                if val is not None:
+                    result[key] = val
+
+        return result
+
+    def get_effective_topic_config(self, chat_id: str, thread_id: int) -> dict[str, Any]:
+        """Get effective topic config with inheritance: global -> group -> topic."""
+        # Start with group config
+        result = self.get_effective_group_config(chat_id)
+
+        # Apply topic config overrides
+        if chat_id in self.config.groups:
+            group = self.config.groups[chat_id]
+            thread_id_str = str(thread_id)
+            if thread_id_str in group.topics:
+                topic = group.topics[thread_id_str]
+                for key in ["group_policy", "require_mention", "allow_from", "skills", "system_prompt", "enabled", "agent_id"]:
+                    val = getattr(topic, key, None)
+                    if val is not None:
+                        result[key] = val
+
+        return result
+
+    def get_effective_config_for_message(self, chat_id: str, thread_id: int | None = None) -> dict[str, Any]:
+        """Get effective config for a message (topic or group level)."""
+        if thread_id is not None and thread_id > 1:  # Topic 1 is "General", not a real topic
+            return self.get_effective_topic_config(chat_id, thread_id)
+        return self.get_effective_group_config(chat_id)
+
+    def _is_group_enabled_for_message(self, chat_id: str, thread_id: int | None = None) -> bool:
+        """Check if bot is enabled for this chat/topic."""
+        config = self.get_effective_config_for_message(chat_id, thread_id)
+        # If enabled is explicitly False, block
+        if config.get("enabled") is False:
+            return False
+        return True
+
+    def _get_group_policy_for_message(self, chat_id: str, thread_id: int | None = None) -> str:
+        """Get effective group policy for this chat/topic."""
+        config = self.get_effective_config_for_message(chat_id, thread_id)
+        return config.get("group_policy", self.config.group_policy)
+
+    def _get_allow_from_for_message(self, chat_id: str, thread_id: int | None = None) -> list[str]:
+        """Get effective allow_from for this chat/topic."""
+        config = self.get_effective_config_for_message(chat_id, thread_id)
+        if "allow_from" in config:
+            return config["allow_from"]
+        # Fall back to global group_allow_from, then global allow_from
+        return self.config.group_allow_from or self.config.allow_from
+
+    def _get_skills_for_message(self, chat_id: str, thread_id: int | None = None) -> list[str] | None:
+        """Get effective skills for this chat/topic."""
+        config = self.get_effective_config_for_message(chat_id, thread_id)
+        return config.get("skills")
+
+    def _get_system_prompt_for_message(self, chat_id: str, thread_id: int | None = None) -> str | None:
+        """Get effective system_prompt for this chat/topic."""
+        config = self.get_effective_config_for_message(chat_id, thread_id)
+        return config.get("system_prompt")
+
+    def _get_agent_id_for_message(self, chat_id: str, thread_id: int) -> str | None:
+        """Get agent_id for topic routing (only applies to topics, not groups)."""
+        if thread_id is not None and thread_id > 1:
+            config = self.get_effective_topic_config(chat_id, thread_id)
+            return config.get("agent_id")
+        return None
+
+    def _get_require_mention_for_message(self, chat_id: str, thread_id: int | None = None) -> bool:
+        """Check if mention is required for this chat/topic."""
+        config = self.get_effective_config_for_message(chat_id, thread_id)
+        if "require_mention" in config:
+            return config["require_mention"]
+        # Default: mention required unless group_policy is "open"
+        return config.get("group_policy", self.config.group_policy) != "open"
+
+    # ==================== ACP Topic Binding ====================
+
+    def is_acp_thread_binding_enabled(self) -> bool:
+        """Check if ACP thread bindings are enabled."""
+        return self.config.thread_bindings
+
+    def get_topic_acp_session_key(self, chat_id: str, thread_id: int) -> str | None:
+        """Get the ACP session key bound to a topic."""
+        if chat_id not in self.config.groups:
+            return None
+        
+        group = self.config.groups[chat_id]
+        thread_id_str = str(thread_id)
+        
+        if thread_id_str not in group.topics:
+            return None
+        
+        topic = group.topics[thread_id_str]
+        return topic.acp_session_key
+
+    def bind_topic_to_acp_session(self, chat_id: str, thread_id: int, acp_session_key: str) -> bool:
+        """Bind a topic to an ACP session."""
+        if chat_id not in self.config.groups:
+            # Create group config first
+            self.config.groups[chat_id] = TelegramGroupConfig()
+        
+        group = self.config.groups[chat_id]
+        thread_id_str = str(thread_id)
+        
+        if thread_id_str not in group.topics:
+            group.topics[thread_id_str] = TelegramTopicConfig()
+        
+        group.topics[thread_id_str].acp_session_key = acp_session_key
+        logger.info("Bound topic {}/{} to ACP session {}", chat_id, thread_id, acp_session_key)
+        return True
+
+    def unbind_topic_from_acp_session(self, chat_id: str, thread_id: int) -> bool:
+        """Unbind a topic from its ACP session."""
+        if chat_id not in self.config.groups:
+            return False
+        
+        group = self.config.groups[chat_id]
+        thread_id_str = str(thread_id)
+        
+        if thread_id_str not in group.topics:
+            return False
+        
+        old_key = group.topics[thread_id_str].acp_session_key
+        group.topics[thread_id_str].acp_session_key = None
+        logger.info("Unbound topic {}/{} from ACP session {}", chat_id, thread_id, old_key)
+        return True
+
+    def get_active_acp_sessions(self) -> list[dict[str, str]]:
+        """Get all active ACP session bindings."""
+        sessions = []
+        
+        for chat_id, group in self.config.groups.items():
+            for thread_id_str, topic in group.topics.items():
+                if topic.acp_session_key:
+                    sessions.append({
+                        "chat_id": chat_id,
+                        "thread_id": thread_id_str,
+                        "session_key": topic.acp_session_key,
+                    })
+        
+        return sessions
+
+    def _route_to_acp_session(self, chat_id: str, thread_id: int, content: str) -> str | None:
+        """Check if message should be routed to ACP session. Returns session key if routed."""
+        if not self.is_acp_thread_binding_enabled():
+            return None
+        
+        session_key = self.get_topic_acp_session_key(chat_id, thread_id)
+        if session_key:
+            logger.info("Routing message to ACP session: {}", session_key)
+            return session_key
+        
+        return None
+
+    def _split_message_on_newlines(self, text: str, max_length: int) -> list[str]:
+        """Split message on paragraph boundaries (blank lines) before length limit."""
+        if len(text) <= max_length:
+            return [text]
+        
+        paragraphs = text.split("\n\n")
+        chunks = []
+        current_chunk = ""
+        
+        for para in paragraphs:
+            if len(current_chunk) + len(para) + 2 <= max_length:
+                if current_chunk:
+                    current_chunk += "\n\n" + para
+                else:
+                    current_chunk = para
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                # If single paragraph exceeds max_length, split by lines
+                if len(para) > max_length:
+                    lines = para.split("\n")
+                    for line in lines:
+                        if len(current_chunk) + len(line) + 1 <= max_length:
+                            current_chunk = (current_chunk + "\n" + line) if current_chunk else line
+                        else:
+                            if current_chunk:
+                                chunks.append(current_chunk)
+                            current_chunk = line
+                else:
+                    current_chunk = para
+        
+        if current_chunk:
+            chunks.append(current_chunk)
+        
+        return chunks if chunks else [text]
 
     def _get_extension(
         self,

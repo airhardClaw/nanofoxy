@@ -23,6 +23,12 @@
 > [!IMPORTANT]
 > **Security note:** Due to `litellm` supply chain poisoning, **please check your Python environment ASAP** and refer to this [advisory](https://github.com/HKUDS/nanobot/discussions/2445) for details. We have fully removed the `litellm` since **v0.1.4.post6**.
 
+- **2026-04-06** 🚀 Released **v0.1.5** — ACP (Agent Client Protocol) support, comprehensive Telegram feature suite (inline buttons, reaction notifications, exec approvals, custom commands, per-group/topic config, streaming modes), and enhanced memory system. See [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.5) for details.
+- **2026-04-05** 🎉 Telegram gets comprehensive feature overhaul — inline buttons, callback queries, message actions gating, reaction notifications, exec approvals (supervised/yolo), custom commands, error policy, text chunking, link preview, media limits, reply modes, streaming modes, ACP thread binding, config writes, and forum topic support.
+- **2026-04-04** 🧠 Memory system improvements — token-based memory with QMD engine, memory consolidation, and citation modes.
+- **2026-04-03** 🔗 Subagent enhancements — spawn tool, mention routing (@subagent_name), role-based routing, and background task execution.
+- **2026-04-02** ⏰ Cron/Heartbeat upgrades — one-shot schedules, cron expressions, timezone support, and human-readable schedule details.
+- **2026-04-01** 🛡️ Security hardening — workspace restrictions, exec approval modes, and improved access control.
 - **2026-03-27** 🚀 Released **v0.1.4.post6** — architecture decoupling, litellm removal, end-to-end streaming, WeChat channel, and a security fix. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post6) for details.
 - **2026-03-26** 🏗️ Agent runner extracted and lifecycle hooks unified; stream delta coalescing at boundaries.
 - **2026-03-25** 🌏 StepFun provider, configurable timezone, Gemini thought signatures.
@@ -122,6 +128,76 @@
 - [Star History](#-star-history)
 
 ## ✨ Features
+
+### 🚀 Agent Features
+
+| Feature | Description |
+|---------|-------------|
+| **LLM ↔ Tools Loop** | Core agent execution loop with tool calling |
+| **Streaming Responses** | End-to-end token streaming for real-time output |
+| **Subagent Spawning** | Spawn background tasks and agents |
+| **Memory System** | Token-based persistent memory with QMD engine |
+| **Skills System** | Load and activate skills inline (`$<name>`) |
+| **Cron Scheduling** | One-shot and recurring scheduled tasks |
+| **Heartbeat** | Periodic wake-up with task execution |
+| **MCP Support** | Connect Model Context Protocol servers |
+| **Web Search/Fetch** | Multi-provider web search and content fetching |
+
+### 📱 Telegram Features
+
+| Feature | Description |
+|---------|-------------|
+| **Long Polling** | Reliable message fetching without webhooks |
+| **DM Policy** | Control DM access (`allowlist`/`open`/`disabled`) |
+| **Group Policy** | Control group responses (`open`/`mention`/`allowlist`/`disabled`) |
+| **Per-group/topic Config** | Override settings per group or topic with inheritance |
+| **Subagent Mentions** | Route to subagents via `@subagent_name` |
+| **Inline Buttons** | Interactive buttons with callback queries |
+| **Message Actions** | Tool gating for send/delete/react/sticker/poll |
+| **Reaction Notifications** | React to bot messages and get notified |
+| **Exec Approvals** | Require approval for exec requests (`supervised`/`yolo` modes) |
+| **Custom Commands** | Register custom bot commands |
+| **Error Policy** | Configurable error handling and cooldown |
+| **Text Chunking** | Split long messages (`length`/`newline` modes) |
+| **Link Preview** | Control URL link previews |
+| **Media Limits** | Set max file size for uploads |
+| **Reply Modes** | Control reply behavior (`off`/`first`/`all`) |
+| **Streaming Modes** | Choose streaming behavior (`off`/`partial`/`block`/`progress`) |
+| **ACP Thread Binding** | Bind topics to ACP sessions |
+| **Config Writes** | Modify config via `/config set`/`/config unset` |
+| **Forum Topics** | Support for Telegram forum topics |
+| **Streaming Replies** | Real-time progressive message editing |
+
+### 🛡️ Security Features
+
+| Feature | Description |
+|---------|-------------|
+| **Workspace Restriction** | Sandbox all tools to workspace directory |
+| **Access Control** | Whitelist-based user access (`allowFrom`) |
+| **Exec Approval Modes** | Require approval for shell commands |
+| **Path Traversal Protection** | Prevent out-of-scope file access |
+
+### 🔌 Provider Features
+
+| Provider | Description |
+|----------|-------------|
+| **OpenRouter** | Gateway to all models |
+| **Anthropic** | Claude direct |
+| **OpenAI** | GPT direct |
+| **DeepSeek** | DeepSeek direct |
+| **Groq** | LLM + free Whisper transcription |
+| **MiniMax** | Mainland China optimized |
+| **Gemini** | Google Gemini direct |
+| **Ollama** | Local models |
+| **vLLM** | Local OpenAI-compatible |
+| **OpenVINO** | Intel GPU acceleration |
+| **Azure OpenAI** | Enterprise Azure deployment |
+| **Step Fun** | Step Fun/阶跃星辰 |
+| **OAuth Providers** | OpenAI Codex, GitHub Copilot |
+
+---
+
+### Use Cases
 
 <table align="center">
   <tr align="center">
@@ -286,12 +362,152 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 > You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`.
 > Copy this value **without the `@` symbol** and paste it into the config file.
 
-
 **3. Run**
 
 ```bash
 nanobot gateway
 ```
+
+<details>
+<summary><b>Advanced Telegram Configuration</b></summary>
+
+### Complete Telegram Config Options
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "YOUR_BOT_TOKEN",
+      "allowFrom": ["123456789", "987654321"],
+      
+      // Access Control
+      "dmPolicy": "allowlist",        // allowlist | open | disabled
+      "groupPolicy": "mention",       // open | mention | allowlist | disabled
+      "groupAllowFrom": [],          // Additional allowlist for groups
+      
+      // Capabilities
+      "capabilities": {
+        "inlineButtons": "allowlist"  // off | dm | group | all | allowlist
+      },
+      
+      // Message Actions (Tool Gating)
+      "actions": {
+        "sendMessage": true,
+        "deleteMessage": true,
+        "reactions": true,
+        "sticker": false,
+        "poll": true
+      },
+      
+      // Delivery & Format
+      "textChunkLimit": 4000,
+      "chunkMode": "length",         // length | newline
+      "linkPreview": true,
+      "replyToMode": "off",           // off | first | all
+      
+      // Media
+      "mediaMaxMb": 100,
+      
+      // Streaming
+      "streamMode": "partial",       // off | partial | block | progress
+      
+      // Reactions
+      "reactionNotifications": "own", // off | own | all
+      "reactionLevel": "minimal",     // off | ack | minimal | extensive
+      
+      // Exec Approvals
+      "execApprovals": {
+        "enabled": true,
+        "mode": "supervised",         // supervised | yolo
+        "approvers": ["123456789"],
+        "target": "dm"               // dm | channel | both
+      },
+      
+      // Error Handling
+      "errorPolicy": "reply",        // reply | silent
+      "errorCooldownMs": 60000,
+      
+      // Commands
+      "commands": {
+        "native": true,
+        "nativeSkills": true
+      },
+      "customCommands": [
+        {"command": "backup", "description": "Git backup"}
+      ],
+      
+      // ACP Thread Binding
+      "threadBindings": true,
+      
+      // Config Persistence
+      "configWrites": true,
+      
+      // Forum Topics Support
+      "replyToMessage": true,
+      "reactEmoji": "👀"
+    }
+  }
+}
+```
+
+### Per-Group/Topic Configuration
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "groups": {
+        "-1001234567890": {
+          "groupPolicy": "mention",
+          "requireMention": true,
+          "enabled": true,
+          "topics": {
+            "42": {
+              "groupPolicy": "open",
+              "agentId": "coder",
+              "skills": ["code_review"],
+              "acpSessionKey": "agent:codex:acp:uuid-123"
+            }
+          }
+        },
+        "*": {
+          "groupPolicy": "open",
+          "enabled": true
+        }
+      }
+    }
+  }
+}
+```
+
+### Telegram Commands
+
+| Command | Description |
+|---------|-------------|
+| `/start` | Start the bot |
+| `/new` | Start a new conversation |
+| `/stop` | Stop the current task |
+| `/restart` | Restart the bot |
+| `/status` | Show bot status |
+| `/skills` | List available skills |
+| `/help` | Show available commands |
+| `/config set <key> <value>` | Set config value |
+| `/config unset <key>` | Reset config to default |
+| `/config show` | Show current config |
+| `/approve <id>` | Approve exec request (if enabled) |
+| `/deny <id>` | Deny exec request (if enabled) |
+
+### Subagent Mentions
+
+Tag subagents in messages:
+```
+Hey @coder, can you review this PR?
+```
+
+### Config Persistence
+
+Config changes persist to `.nanobot/telegram-config.json` in your workspace directory.
 
 </details>
 
@@ -1371,8 +1587,60 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
+### ACP (Agent Client Protocol)
 
+> [!TIP]
+> ACP enables binding external AI harnesses (like Codex, Claude Code, OpenCode) to Telegram topics.
 
+nanobot supports ACP (Agent Client Protocol) for connecting external AI runtimes to Telegram topics.
+
+```json
+{
+  "acp": {
+    "enabled": true,
+    "defaultAgent": "codex",
+    "allowedAgents": ["codex", "claude", "opencode"],
+    "maxConcurrentSessions": 8
+  },
+  "channels": {
+    "telegram": {
+      "threadBindings": true
+    }
+  }
+}
+```
+
+#### ACP Topic Binding
+
+When `threadBindings` is enabled, you can bind Telegram topics to ACP sessions:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "groups": {
+        "-1001234567890": {
+          "topics": {
+            "42": {
+              "acpSessionKey": "agent:codex:acp:uuid-123"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Messages in bound topics will be routed to the ACP session instead of the native agent.
+
+| Config Option | Description |
+|---------------|-------------|
+| `acp.enabled` | Enable ACP support globally |
+| `acp.defaultAgent` | Default ACP harness (codex, claude, opencode) |
+| `acp.allowedAgents` | List of allowed ACP agents |
+| `acp.maxConcurrentSessions` | Max concurrent ACP sessions |
+| `channels.telegram.threadBindings` | Enable topic binding for Telegram |
 
 ### Security
 
@@ -1385,7 +1653,32 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
+| `tools.exec.approvalMode` | `"inherit"` | Exec approval mode: `"inherit"` (use channel setting), `"supervised"` (require approval), `"yolo"` (auto-approve). |
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
+
+### Telegram Exec Approvals
+
+Telegram supports two exec approval modes:
+
+| Mode | Behavior |
+|------|----------|
+| `supervised` | Show approval buttons in messages. Users can approve via `/approve <id>` or `/deny <id>` commands. |
+| `yolo` | Auto-approve all exec requests without confirmation. |
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "execApprovals": {
+        "enabled": true,
+        "mode": "supervised",
+        "approvers": ["123456789"],
+        "target": "dm"
+      }
+    }
+  }
+}
+```
 
 
 ### Timezone
@@ -1542,12 +1835,26 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot agent --no-markdown` | Show plain-text replies |
 | `nanobot agent --logs` | Show runtime logs during chat |
 | `nanobot gateway` | Start the gateway |
+| `nanobot gateway -p <port>` | Start gateway on specific port |
 | `nanobot status` | Show status |
-| `nanobot provider login openai-codex` | OAuth login for providers |
-| `nanobot channels login <channel>` | Authenticate a channel interactively |
+| `nanobot status --verbose` | Show detailed status |
+| `nanobot provider login openai-codex` | OAuth login for OpenAI Codex |
+| `nanobot provider login github-copilot` | OAuth login for GitHub Copilot |
+| `nanobot channels login whatsapp` | Authenticate WhatsApp via QR |
+| `nanobot channels login weixin` | Authenticate WeChat via QR |
 | `nanobot channels status` | Show channel status |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
+
+### Advanced Options
+
+| Option | Description |
+|--------|-------------|
+| `-c, --config <path>` | Path to config file |
+| `-w, --workspace <path>` | Path to workspace directory |
+| `-p, --port <port>` | Gateway port (default: 18790) |
+| `--no-markdown` | Disable markdown rendering |
+| `--logs` | Show runtime logs |
 
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>

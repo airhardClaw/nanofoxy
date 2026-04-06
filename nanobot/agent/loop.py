@@ -18,6 +18,7 @@ from nanobot.agent.memory import MemoryConsolidator, QMDEngine
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.gnome_calendar import GNOMECalendarTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.utils.helpers import smart_truncate_messages
 from nanobot.providers.base import LLMProvider
@@ -177,6 +178,7 @@ class AgentLoop:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
             )
+        self.tools.register(GNOMECalendarTool())
         self.tools.register(MemoryTool(
             workspace=self.workspace,
             qmd_engine=self._qmd_engine,

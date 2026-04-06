@@ -13,6 +13,25 @@ class Base(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
+
+class ACPConfig(Base):
+    """ACP (Agent Client Protocol) configuration."""
+
+    enabled: bool = False
+    default_agent: str = "codex"
+    allowed_agents: list[str] = Field(default_factory=lambda: ["codex", "claude", "opencode"])
+    max_concurrent_sessions: int = 8
+
+
+class ACPThreadBindingsConfig(Base):
+    """ACP thread binding configuration."""
+
+    enabled: bool = False
+    spawn_acp_sessions: bool = False  # Allow spawning ACP sessions in threads
+    idle_hours: int = 24
+    max_age_hours: int = 0
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -293,6 +312,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    acp: ACPConfig = Field(default_factory=ACPConfig)
 
     @property
     def workspace_path(self) -> Path:
