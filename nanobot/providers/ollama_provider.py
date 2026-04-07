@@ -76,9 +76,9 @@ class OllamaProvider(LLMProvider):
             tool_call_id = msg.get("tool_call_id")
             name = msg.get("name")
 
+            images = []
             if isinstance(content, list):
                 new_content = []
-                images = []
                 for item in content:
                     if isinstance(item, dict):
                         if item.get("type") == "image_url":

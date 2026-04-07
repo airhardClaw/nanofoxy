@@ -373,6 +373,14 @@ def find_by_name(name: str) -> ProviderSpec | None:
 
 def get_native_api_base(spec: ProviderSpec, api_base: str | None) -> str | None:
     """Get native API base URL for providers that have one (e.g. LM Studio, Ollama)."""
+    if api_base:
+        from urllib.parse import urlparse
+        parsed = urlparse(api_base)
+        host = parsed.netloc or parsed.path
+        if spec and spec.name == "lmstudio":
+            return f"http://{host}/api/v1"
+        if spec and spec.name == "ollama":
+            return f"http://{host}/api"
     if spec and spec.name == "lmstudio":
         return spec.native_api_base or "http://localhost:1234/api/v1"
     if spec and spec.name == "ollama":
