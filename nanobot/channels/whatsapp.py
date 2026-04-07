@@ -28,6 +28,12 @@ class WhatsAppConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention"] = "open"  # "open" responds to all, "mention" only when @mentioned
 
+    # Voice transcription
+    voice_transcription_enabled: bool = True
+    voice_transcription_provider: Literal["groq", "openai"] = "groq"  # Whisper provider
+    groq_api_key: str = ""
+    openai_api_key: str = ""
+
 
 class WhatsAppChannel(BaseChannel):
     """
@@ -203,11 +209,19 @@ class WhatsAppChannel(BaseChannel):
 
             # Handle voice transcription if it's a voice message
             if content == "[Voice Message]":
-                logger.info(
-                    "Voice message received from {}, but direct download from bridge is not yet supported.",
-                    sender_id,
-                )
-                content = "[Voice Message: Transcription not available for WhatsApp yet]"
+                if getattr(self.config, "voice_transcription_enabled", True):
+                    media_paths = data.get("media") or []
+                    if media_paths:
+                        audio_path = media_paths[0]
+                        transcription = await self._transcribe_voice(audio_path)
+                        if transcription:
+                            content = f"[Voice Message Transcript]: {transcription}"
+                        else:
+                            content = "[Voice Message: Transcription failed]"
+                    else:
+                        content = "[Voice Message: Media not available]"
+                else:
+                    content = "[Voice Message]"
 
             # Extract media paths (images/documents/videos downloaded by the bridge)
             media_paths = data.get("media") or []
@@ -298,4 +312,75 @@ def _ensure_bridge_setup() -> Path:
     subprocess.run([npm_path, "run", "build"], cwd=user_bridge, check=True, capture_output=True)
 
     logger.info("Bridge ready")
+
+    async def _transcribe_voice(self, audio_path: str) -> str | None:
+        """Transcribe voice message using Whisper.
+
+        Args:
+            audio_path: Path to the audio file.
+
+        Returns:
+            Transcribed text or None on failure.
+        """
+        from pathlib import Path
+
+        audio_file = Path(audio_path)
+        if not audio_file.exists():
+            logger.warning("Audio file not found: {}", audio_path)
+            return None
+
+        provider = getattr(self.config, "voice_transcription_provider", "groq")
+
+        try:
+            if provider == "groq":
+                api_key = self.config.groq_api_key or os.environ.get("GROQ_API_KEY", "")
+                if not api_key:
+                    logger.warning("GROQ_API_KEY not set for voice transcription")
+                    return None
+
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    with open(audio_file, "rb") as f:
+                        files = {"file": (audio_file.name, f.read(), "audio/ogg")}
+                        data = {"model": "whisper-large-v3"}
+                        headers = {"Authorization": f"Bearer {api_key}"}
+                        r = await client.post(
+                            "https://api.groq.com/openai/v1/audio/transcriptions",
+                            files=files,
+                            data=data,
+                            headers=headers,
+                            timeout=60.0,
+                        )
+                if r.status_code != 200:
+                    logger.warning("Groq transcription failed: {}", r.text)
+                    return None
+                return r.json().get("text", "")
+
+            else:  # openai
+                api_key = self.config.openai_api_key or os.environ.get("OPENAI_API_KEY", "")
+                if not api_key:
+                    logger.warning("OPENAI_API_KEY not set for voice transcription")
+                    return None
+
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    with open(audio_file, "rb") as f:
+                        files = {"file": (audio_file.name, f.read(), "audio/ogg")}
+                        data = {"model": "whisper-1"}
+                        headers = {"Authorization": f"Bearer {api_key}"}
+                        r = await client.post(
+                            "https://api.openai.com/v1/audio/transcriptions",
+                            files=files,
+                            data=data,
+                            headers=headers,
+                            timeout=60.0,
+                        )
+                if r.status_code != 200:
+                    logger.warning("OpenAI transcription failed: {}", r.text)
+                    return None
+                return r.json().get("text", "")
+
+        except Exception as e:
+            logger.warning("Voice transcription error: {}", e)
+            return None
     return user_bridge

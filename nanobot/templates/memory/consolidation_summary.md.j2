@@ -1,0 +1,14 @@
+# Memory Consolidation Summary
+
+## Session Information
+- **Session**: {{ session }}
+- **Model**: {{ model }}
+- **Timestamp**: {{ timestamp }}
+
+## Recent Events
+{% for event in recent_events %}
+- {{ event }}
+{% endfor %}
+
+## Current Context
+{{ memory }}

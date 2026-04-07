@@ -38,6 +38,7 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.system import SystemMonitorTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
@@ -73,6 +74,7 @@ class AgentLoop:
         context_window_tokens: int = 65_536,
         web_search_config: WebSearchConfig | None = None,
         web_proxy: str | None = None,
+        web_tools_enabled: bool = True,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
@@ -94,6 +96,7 @@ class AgentLoop:
         self.context_window_tokens = context_window_tokens
         self.web_search_config = web_search_config or WebSearchConfig()
         self.web_proxy = web_proxy
+        self.web_tools_enabled = web_tools_enabled
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -111,6 +114,7 @@ class AgentLoop:
             model=self.model,
             web_search_config=self.web_search_config,
             web_proxy=web_proxy,
+            web_tools_enabled=web_tools_enabled,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
             session_manager=self.sessions,
@@ -170,8 +174,11 @@ class AgentLoop:
                 restrict_to_workspace=self.restrict_to_workspace,
                 path_append=self.exec_config.path_append,
             ))
-        self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
-        self.tools.register(WebFetchTool(proxy=self.web_proxy))
+        if self.web_tools_enabled:
+            self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
+            self.tools.register(WebFetchTool(proxy=self.web_proxy))
+        self.tools.register(GlobTool(workspace=self.workspace, restrict_to_workspace=self.restrict_to_workspace))
+        self.tools.register(GrepTool(workspace=self.workspace, restrict_to_workspace=self.restrict_to_workspace))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:

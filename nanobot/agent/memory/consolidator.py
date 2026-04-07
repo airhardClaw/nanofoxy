@@ -60,6 +60,22 @@ class MemoryConsolidator:
         else:
             self.dreaming = None
 
+        self._version_manager = None
+        self._template_engine = None
+        self._init_versioning(workspace)
+
+    def _init_versioning(self, workspace: Path) -> None:
+        """Initialize git versioning and templating if available."""
+        try:
+            from nanobot.agent.memory.git_versioned import MemoryVersionManager
+            from nanobot.agent.memory.templating import TemplateEngine
+
+            self._version_manager = MemoryVersionManager(workspace)
+            self._template_engine = TemplateEngine(workspace)
+            logger.debug("Initialized git versioning and templating for memory")
+        except ImportError as e:
+            logger.warning("Git/templating support not available: {}", e)
+
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
@@ -70,6 +86,9 @@ class MemoryConsolidator:
         
         if success and self.qmd_engine:
             await self._index_to_qmd(messages)
+        
+        if success and self._version_manager:
+            self._version_manager.auto_save()
         
         return success
 

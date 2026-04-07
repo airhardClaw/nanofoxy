@@ -253,6 +253,10 @@ class FeishuConfig(Base):
     reply_to_message: bool = False  # If True, bot replies quote the user's original message
     streaming: bool = True
 
+    # Auto-reaction and video support
+    auto_remove_reaction: bool = True  # Remove bot's reaction after processing
+    video_download_enabled: bool = True  # Enable video download support
+
 
 _STREAM_ELEMENT_ID = "streaming_md"
 
@@ -449,6 +453,29 @@ class FeishuChannel(BaseChannel):
 
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
+
+    async def _remove_reaction(self, message_id: str, emoji_type: str = "THUMBSUP") -> None:
+        """Remove a reaction emoji from a message."""
+        if not getattr(self.config, "auto_remove_reaction", True):
+            return
+        if not self._client:
+            return
+
+        def _remove_sync():
+            from lark_oapi.api.im.v1 import DeleteMessageReactionRequest, Emoji
+            try:
+                request = DeleteMessageReactionRequest.builder() \
+                    .message_id(message_id) \
+                    .reaction_type(Emoji.builder().emoji_type(emoji_type).build()) \
+                    .build()
+                response = self._client.im.v1.message_reaction.delete(request)
+                if not response.success():
+                    logger.debug("Failed to remove reaction: code={}, msg={}", response.code, response.msg)
+            except Exception as e:
+                logger.debug("Error removing reaction: {}", e)
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _remove_sync)
 
     # Regex to match markdown tables (header + separator + data rows)
     _TABLE_RE = re.compile(

@@ -118,6 +118,8 @@ class ProvidersConfig(Base):
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     mistral: ProviderConfig = Field(default_factory=ProviderConfig)
     stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰)
+    qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Baidu Qianfan (百度千帆)
+    mimo: ProviderConfig = Field(default_factory=ProviderConfig)  # Xiaomi MiMo
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
@@ -142,7 +144,7 @@ class HeartbeatConfig(Base):
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"  # Bind to localhost by default for security
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
@@ -159,6 +161,9 @@ class WebSearchConfig(Base):
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
+    model_config = ConfigDict(extra="allow")
+
+    enabled: bool = True  # Toggle for all web tools
     proxy: str | None = (
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )
@@ -248,6 +253,8 @@ class MemoryConfig(Base):
     qmd: QMDConfig = Field(default_factory=QMDConfig)
     citations: Literal["auto", "on", "off"] = "auto"  # Include citations in search results
     dreaming: "DreamingConfig" = Field(default_factory=lambda: DreamingConfig())  # Dreaming configuration
+    versioning: bool = True  # Enable git-versioned memory storage
+    templating: bool = True  # Enable Jinja2 templating for responses
 
 
 class DreamingPhaseConfig(Base):
@@ -328,6 +335,16 @@ class ToolsConfig(Base):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
 
 
+class LangfuseConfig(Base):
+    """Langfuse observability configuration."""
+
+    enabled: bool = False
+    public_key: str = ""
+    secret_key: str = ""
+    host: str = "https://cloud.langfuse.com"  # or self-hosted URL
+    release: str | None = None  # e.g. "1.0.0" for release tracking
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -337,6 +354,8 @@ class Config(BaseSettings):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     acp: ACPConfig = Field(default_factory=ACPConfig)
+    ssrf_whitelist: list[str] = Field(default_factory=list)  # Additional CIDR ranges to allow (e.g. Tailscale/CGNAT)
+    langfuse: "LangfuseConfig" = Field(default_factory=lambda: LangfuseConfig())  # Langfuse observability
 
     @property
     def workspace_path(self) -> Path:

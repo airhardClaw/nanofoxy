@@ -470,7 +470,8 @@ def _make_provider(config: Config):
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
-    from nanobot.config.loader import load_config, set_config_path
+    from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
+    from nanobot.security.network import set_ssrf_whitelist
 
     config_path = None
     if config:
@@ -485,6 +486,13 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     _warn_deprecated_config_keys(config_path)
     if workspace:
         loaded.agents.defaults.workspace = workspace
+
+    # Resolve ${VAR} environment variable references in config
+    loaded = resolve_config_env_vars(loaded)
+
+    # Apply SSRF whitelist from config
+    set_ssrf_whitelist(loaded.ssrf_whitelist)
+
     return loaded
 
 
@@ -515,6 +523,26 @@ def _migrate_cron_store(config: "Config") -> None:
         new_path.parent.mkdir(parents=True, exist_ok=True)
         import shutil
         shutil.move(str(legacy_path), str(new_path))
+
+
+# ============================================================================
+# API Server Commands
+# ============================================================================
+
+
+
+@app.command()
+def serve(
+    port: int = typer.Option(18791, "--port", "-p", help="API server port"),
+    host: str = typer.Option("0.0.0.0", "--host", "-h", help="API server host"),
+    gateway_host: str = typer.Option("127.0.0.1", "--gateway-host", help="Nanobot gateway host"),
+    gateway_port: int = typer.Option(18790, "--gateway-port", help="Nanobot gateway port"),
+):
+    """Start the OpenAI-compatible API server."""
+    from nanobot.api.server import run_server
+
+    console.print(f"{__logo__} Starting nanobot-api on {host}:{port}...")
+    run_server(host=host, port=port)
 
 
 # ============================================================================
@@ -563,6 +591,8 @@ def gateway(
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
+    web_config = config.tools.web
+    web_tools_enabled = web_config.enabled if hasattr(web_config, 'enabled') else True
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -570,8 +600,9 @@ def gateway(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
-        web_search_config=config.tools.web.search,
-        web_proxy=config.tools.web.proxy or None,
+        web_search_config=web_config.search,
+        web_proxy=web_config.proxy or None,
+        web_tools_enabled=web_tools_enabled,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -941,6 +972,7 @@ def agent(
         context_window_tokens=config.agents.defaults.context_window_tokens,
         web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
+        web_tools_enabled=config.tools.web.enabled if hasattr(config.tools.web, 'enabled') else True,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -1389,6 +1421,17 @@ def status():
             else:
                 has_key = bool(p.api_key)
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+
+        # Web search provider info
+        web_config = config.tools.web
+        search_config = web_config.search
+        web_enabled = web_config.enabled if hasattr(web_config, 'enabled') else True
+        console.print(f"\n[bold]Web Tools:[/bold] {'[green]Enabled[/green]' if web_enabled else '[dim]Disabled[/dim]'}")
+        console.print(f"  Search provider: {search_config.provider}")
+        if search_config.api_key:
+            console.print(f"  Search API key: [green]✓[/green]")
+        else:
+            console.print(f"  Search API key: [dim]not set (using DuckDuckGo fallback)[/dim]")
 
 
 # ============================================================================

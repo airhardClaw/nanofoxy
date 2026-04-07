@@ -299,6 +299,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.stepfun.com/v1",
     ),
+    # Baidu Qianfan (百度千帆): Chinese ecosystem
+    ProviderSpec(
+        name="qianfan",
+        keywords=("qianfan", "ernie", "baidu"),
+        env_key="QIANFAN_API_KEY",
+        display_name="Baidu Qianfan",
+        backend="openai_compat",
+        default_api_base="https://qianfan.baidubce.com/v2",
+    ),
+    # Xiaomi MiMo: On-device inference support
+    ProviderSpec(
+        name="mimo",
+        keywords=("mimo", "xiaomi"),
+        env_key="MIMO_API_KEY",
+        display_name="Xiaomi MiMo",
+        backend="openai_compat",
+        default_api_base="https://api.xiaomi.cn/v1",
+    ),
     # === Local deployment (matched by config key, NOT by api_base) =========
     # vLLM / any OpenAI-compatible local server
     ProviderSpec(

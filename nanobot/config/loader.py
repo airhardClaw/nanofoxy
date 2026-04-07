@@ -1,7 +1,10 @@
 """Configuration loading utilities."""
 
 import json
+import os
+import re
 from pathlib import Path
+from typing import Any
 
 import pydantic
 from loguru import logger
@@ -9,6 +12,49 @@ from nanobot.config.schema import Config
 
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
+
+ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def resolve_config_env_vars(config: Config) -> Config:
+    """Resolve ${VAR} environment variable references in config string values.
+
+    This allows secrets to be stored in environment variables instead of
+    plain text in config.json. Variables are resolved at runtime, while
+    the raw templates are preserved in the config object for save_config().
+
+    Args:
+        config: Configuration object to resolve env vars in.
+
+    Returns:
+        New Config instance with resolved env vars.
+    """
+    import copy
+
+    resolved = copy.deepcopy(config)
+    data = resolved.model_dump(mode="json", by_alias=True)
+
+    def resolve_value(val: Any) -> Any:
+        if isinstance(val, str):
+            def replace_var(m: re.Match) -> str:
+                var_name = m.group(1)
+                env_val = os.environ.get(var_name)
+                if env_val is None:
+                    raise ValueError(
+                        f"Environment variable '{var_name}' is not set. "
+                        f"Please set it or remove ${{{var_name}}} from config."
+                    )
+                return env_val
+
+            return ENV_VAR_PATTERN.sub(replace_var, val)
+        elif isinstance(val, dict):
+            return {k: resolve_value(v) for k, v in val.items()}
+        elif isinstance(val, list):
+            return [resolve_value(item) for item in val]
+        return val
+
+    resolved = Config.model_validate(resolve_value(data))
+    return resolved
 
 
 def set_config_path(path: Path) -> None:

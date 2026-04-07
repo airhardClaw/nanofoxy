@@ -3,12 +3,65 @@
 import asyncio
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 from nanobot.agent.tools.base import Tool
+
+
+# Sensitive environment variables to filter out (prevent leaking to exec)
+_SENSITIVE_ENV_VARS = {
+    "API_KEY", "APIKEY", "SECRET", "TOKEN", "PASSWORD", "PRIVATE_KEY",
+    "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "DATABASE_URL",
+    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY",
+    "DEEPSEEK_API_KEY", "DASHSCOPE_API_KEY", "MOONSHOT_API_KEY",
+    "ZAI_API_KEY", "GEMINI_API_KEY", "MISTRAL_API_KEY",
+    # Also filter nanobot-specific and common secret suffixes
+}
+
+
+def _is_sensitive_var(name: str) -> bool:
+    """Check if env var name suggests it contains secrets."""
+    name_upper = name.upper()
+    for sensitive in _SENSITIVE_ENV_VARS:
+        if name_upper.endswith(sensitive) or sensitive in name_upper:
+            return True
+    return False
+
+
+def _get_clean_env(path_append: str = "") -> dict[str, str]:
+    """Get a clean environment for exec, filtering sensitive vars.
+    
+    This prevents leaking API keys and secrets to the exec tool.
+    """
+    clean_env = {
+        "HOME": os.environ.get("HOME", "/root"),
+        "USER": os.environ.get("USER", "root"),
+        "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        "SHELL": os.environ.get("SHELL", "/bin/sh"),
+        "LANG": os.environ.get("LANG", "en_US.UTF-8"),
+        "LC_ALL": os.environ.get("LC_ALL", "en_US.UTF-8"),
+        "TMPDIR": os.environ.get("TMPDIR", "/tmp"),
+        "TERM": os.environ.get("TERM", "xterm-256color"),
+    }
+    
+    # Copy only non-sensitive environment variables
+    for key, value in os.environ.items():
+        if not _is_sensitive_var(key):
+            clean_env[key] = value
+    
+    if path_append:
+        clean_env["PATH"] = clean_env["PATH"] + os.pathsep + path_append
+    
+    return clean_env
+
+
+def _has_bwrap() -> bool:
+    """Check if bwrap is available on the system."""
+    return shutil.which("bwrap") is not None
 
 
 class ExecTool(Tool):
@@ -22,6 +75,7 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
+        use_sandbox: bool = False,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -39,6 +93,7 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+        self.use_sandbox = use_sandbox and _has_bwrap()
 
     @property
     def name(self) -> str:
@@ -88,11 +143,14 @@ class ExecTool(Tool):
 
         effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
 
-        env = os.environ.copy()
-        if self.path_append:
-            env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
+        # Use clean environment to prevent leaking secrets
+        env = _get_clean_env(self.path_append)
 
         try:
+            # Build the command with bwrap if sandboxing is enabled
+            if self.use_sandbox:
+                command = self._wrap_with_bwrap(command, cwd)
+
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
@@ -201,3 +259,31 @@ class ExecTool(Tool):
         posix_paths = re.findall(r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
         home_paths = re.findall(r"(?:^|[\s|>'\"])(~[^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~
         return win_paths + posix_paths + home_paths
+
+    def _wrap_with_bwrap(self, command: str, cwd: str) -> str:
+        """Wrap command with bwrap for sandboxed execution.
+
+        Creates a minimal namespace with only necessary access.
+        """
+        # bwrap options:
+        # --new-session: Create new session (isolation)
+        # --die-with-parent: Kill sandbox when parent dies
+        # --ro-bind / /: Read-only bind of root (prevents escaping)
+        # --bind /cwd /cwd: Bind working directory
+        # --tmpfs /tmp: Private tmpfs
+        # --unshare-user: Unshare user namespace
+        # --unshare-ipc: Unshare IPC namespace
+        # --unshare-net: Unshare network (optional, commented out for usability)
+        bwrap_cmd = [
+            "bwrap",
+            "--new-session",
+            "--die-with-parent",
+            "--ro-bind", "/", "/",
+            "--bind", cwd, cwd,
+            "--tmpfs", "/tmp",
+            "--unshare-user",
+            "--unshare-ipc",
+            # "--unshare-net",  # Disabled by default - enable if strict isolation needed
+        ]
+        # Add shell wrapper
+        return " ".join(bwrap_cmd) + f" /bin/sh -c {command!r}"

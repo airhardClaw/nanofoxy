@@ -22,6 +22,7 @@ from nanobot.agent.tools.memory import MemoryTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig, WebSearchConfig
@@ -40,6 +41,7 @@ class SubagentManager:
         model: str | None = None,
         web_search_config: "WebSearchConfig | None" = None,
         web_proxy: str | None = None,
+        web_tools_enabled: bool = True,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
         session_manager: "SessionManager | None" = None,
@@ -50,6 +52,7 @@ class SubagentManager:
         self.model = model or provider.get_default_model()
         self.web_search_config = web_search_config or WebSearchConfig()
         self.web_proxy = web_proxy
+        self.web_tools_enabled = web_tools_enabled
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self.session_manager = session_manager
@@ -454,8 +457,11 @@ Wichtige Hinweise:
                 restrict_to_workspace=self.restrict_to_workspace,
                 path_append=self.exec_config.path_append,
             ))
-            tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
-            tools.register(WebFetchTool(proxy=self.web_proxy))
+            if self.web_tools_enabled:
+                tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
+                tools.register(WebFetchTool(proxy=self.web_proxy))
+            tools.register(GlobTool(workspace=self.workspace, restrict_to_workspace=self.restrict_to_workspace))
+            tools.register(GrepTool(workspace=self.workspace, restrict_to_workspace=self.restrict_to_workspace))
             
             system_prompt = self._build_subagent_prompt()
             messages: list[dict[str, Any]] = [

@@ -20,10 +20,28 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("fe80::/10"),         # link-local v6
 ]
 
+# Additional networks from config (e.g. Tailscale/CGNAT)
+_EXTRA_ALLOWED_NETWORKS: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+
 _URL_RE = re.compile(r"https?://[^\s\"'`;|<>]+", re.IGNORECASE)
 
 
+def set_ssrf_whitelist(cidr_list: list[str]) -> None:
+    """Set additional CIDR ranges to allow (e.g. from config ssrf_whitelist)."""
+    global _EXTRA_ALLOWED_NETWORKS
+    _EXTRA_ALLOWED_NETWORKS = []
+    for cidr in cidr_list:
+        try:
+            _EXTRA_ALLOWED_NETWORKS.append(ipaddress.ip_network(cidr, strict=False))
+        except ValueError:
+            pass  # Skip invalid CIDR
+
+
 def _is_private(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    # First check if it's in the extra allowed networks
+    for net in _EXTRA_ALLOWED_NETWORKS:
+        if addr in net:
+            return False
     return any(addr in net for net in _BLOCKED_NETWORKS)
 
 

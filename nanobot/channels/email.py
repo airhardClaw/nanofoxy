@@ -55,6 +55,14 @@ class EmailConfig(Base):
     verify_dkim: bool = True   # Require Authentication-Results with dkim=pass
     verify_spf: bool = True    # Require Authentication-Results with spf=pass
 
+    # Attachment extraction
+    extract_attachments: bool = True  # Extract attachments from incoming emails
+    allowed_attachment_types: list[str] = Field(default_factory=lambda: [
+        "text/", "image/", "application/pdf", "application/json"
+    ])  # MIME type prefixes to allow
+    max_attachment_size_mb: int = 10  # Max attachment size in MB
+    sanitize_filenames: bool = True  # Sanitize attachment filenames for security
+
 
 class EmailChannel(BaseChannel):
     """
@@ -543,6 +551,67 @@ class EmailChannel(BaseChannel):
         text = re.sub(r"<\s*/\s*p\s*>", "\n", text, flags=re.IGNORECASE)
         text = re.sub(r"<[^>]+>", "", text)
         return html.unescape(text)
+
+    def _extract_attachments(self, msg: Any) -> list[dict[str, Any]]:
+        """Extract attachments from email message.
+
+        Returns:
+            List of attachment dicts with name, content, content_type.
+        """
+        if not self.config.extract_attachments:
+            return []
+
+        attachments = []
+        max_size = self.config.max_attachment_size_mb * 1024 * 1024
+
+        for part in msg.walk():
+            content_disp = part.get_content_disposition()
+            if content_disp != "attachment":
+                continue
+
+            filename = part.get_filename() or "attachment"
+            if self.config.sanitize_filenames:
+                filename = self._sanitize_filename(filename)
+
+            content_type = part.get_content_type()
+            if not self._is_allowed_attachment_type(content_type):
+                logger.debug("Skipping disallowed attachment type: {}", content_type)
+                continue
+
+            try:
+                payload = part.get_payload(decode=True)
+                if not payload:
+                    continue
+
+                if len(payload) > max_size:
+                    logger.warning("Attachment {} exceeds size limit, skipping", filename)
+                    continue
+
+                attachments.append({
+                    "name": filename,
+                    "content": payload,
+                    "content_type": content_type,
+                    "size": len(payload),
+                })
+            except Exception as e:
+                logger.warning("Failed to extract attachment {}: {}", filename, e)
+
+        return attachments
+
+    def _sanitize_filename(self, filename: str) -> str:
+        """Sanitize filename for security."""
+        import os
+        basename = os.path.basename(filename)
+        basename = re.sub(r"[^\w\-.]", "_", basename)
+        basename = basename[:200]
+        return basename or "attachment"
+
+    def _is_allowed_attachment_type(self, content_type: str) -> bool:
+        """Check if attachment MIME type is allowed."""
+        for allowed in self.config.allowed_attachment_types:
+            if content_type.startswith(allowed):
+                return True
+        return False
 
     def _reply_subject(self, base_subject: str) -> str:
         subject = (base_subject or "").strip() or "nanobot reply"
