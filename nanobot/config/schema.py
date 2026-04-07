@@ -69,6 +69,27 @@ class AgentsConfig(Base):
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
 
 
+class LMStudioSettings(BaseModel):
+    """LM Studio-specific configuration."""
+
+    context_length: int = 32768
+    flash_attention: bool = True
+    eval_batch_size: int = 512
+    offload_kv_cache_to_gpu: bool = True
+    auto_load: bool = True
+    use_stateful_chat: bool = True
+    llama_k_cache_quantization_type: str = "Q8_0"
+    llama_v_cache_quantization_type: str = "Q4_0"
+
+
+class OllamaSettings(BaseModel):
+    """Ollama-specific configuration."""
+
+    use_native_api: bool = True  # Use native /api/chat instead of OpenAI compat
+    think: str | None = None  # "high", "medium", "low" - enable thinking mode
+    keep_alive: str = "5m"  # Model keep-alive duration
+
+
 class ProviderConfig(Base):
     """LLM provider configuration."""
 
@@ -105,6 +126,9 @@ class ProvidersConfig(Base):
     byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
+    lmstudio: ProviderConfig = Field(default_factory=ProviderConfig)  # LM Studio (local, with native API support)
+    lmstudio_settings: LMStudioSettings = Field(default_factory=LMStudioSettings)
+    ollama_settings: OllamaSettings = Field(default_factory=OllamaSettings)
 
 
 class HeartbeatConfig(Base):

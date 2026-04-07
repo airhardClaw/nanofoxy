@@ -63,6 +63,9 @@ class ProviderSpec:
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
 
+    # Native API base for providers with dedicated REST API (e.g. LM Studio)
+    native_api_base: str = ""
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -306,27 +309,29 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         is_local=True,
     ),
-    # Ollama (local, OpenAI-compatible)
+    # Ollama (local, native REST API)
     ProviderSpec(
         name="ollama",
         keywords=("ollama", "nemotron"),
         env_key="OLLAMA_API_KEY",
         display_name="Ollama",
-        backend="openai_compat",
+        backend="ollama",
         is_local=True,
         detect_by_base_keyword="11434",
         default_api_base="http://localhost:11434/v1",
+        native_api_base="http://localhost:11434/api",
     ),
-    # LM Studio (local, OpenAI-compatible for Qwen2.5-8B)
+    # LM Studio (local, OpenAI-compatible + native REST API)
     ProviderSpec(
         name="lmstudio",
         keywords=("lmstudio", "lm_studio"),
         env_key="",
         display_name="LM Studio",
-        backend="openai_compat",
+        backend="lmstudio",
         is_local=True,
         detect_by_base_keyword="1234",
         default_api_base="http://localhost:1234/v1",
+        native_api_base="http://localhost:1234/api/v1",
     ),
     # === OpenVINO Model Server (direct, local, OpenAI-compatible at /v3) ===
     ProviderSpec(
@@ -364,3 +369,22 @@ def find_by_name(name: str) -> ProviderSpec | None:
         if spec.name == normalized:
             return spec
     return None
+
+
+def get_native_api_base(spec: ProviderSpec, api_base: str | None) -> str | None:
+    """Get native API base URL for providers that have one (e.g. LM Studio, Ollama)."""
+    if spec and spec.name == "lmstudio":
+        return spec.native_api_base or "http://localhost:1234/api/v1"
+    if spec and spec.name == "ollama":
+        return spec.native_api_base or "http://localhost:11434/api"
+    return None
+
+
+def get_provider(config: Any) -> tuple[Any, str | None]:
+    """Create and return a provider instance from config.
+    
+    Returns (provider, provider_name).
+    """
+    from nanobot.providers.base import GenerationSettings
+    from nanobot.cli.commands import _create_provider
+    return _create_provider(config), config.get_provider_name()

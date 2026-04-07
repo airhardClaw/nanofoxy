@@ -423,6 +423,32 @@ def _make_provider(config: Config):
             default_model=model,
             extra_headers=p.extra_headers if p else None,
         )
+    elif backend == "lmstudio":
+        from nanobot.providers.lmstudio_provider import LMStudioProvider
+        from nanobot.providers.registry import get_native_api_base
+        native_api_base = get_native_api_base(spec, config.get_api_base(model))
+        provider = LMStudioProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            native_api_base=native_api_base,
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            spec=spec,
+            lmstudio_settings=config.providers.lmstudio_settings,
+        )
+    elif backend == "ollama":
+        from nanobot.providers.ollama_provider import OllamaProvider
+        from nanobot.providers.registry import get_native_api_base
+        native_api_base = get_native_api_base(spec, config.get_api_base(model))
+        provider = OllamaProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            native_api_base=native_api_base,
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            spec=spec,
+            ollama_settings=config.providers.ollama_settings,
+        )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
         provider = OpenAICompatProvider(
