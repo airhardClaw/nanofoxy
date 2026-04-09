@@ -33,6 +33,7 @@ from nanobot.agent.tools.filesystem import (
 from nanobot.agent.tools.memory import MemoryTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.speak import SpeakTool
 from nanobot.agent.tools.roles import DescribeRoleTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
@@ -180,6 +181,7 @@ class AgentLoop:
         self.tools.register(GlobTool(workspace=self.workspace, restrict_to_workspace=self.restrict_to_workspace))
         self.tools.register(GrepTool(workspace=self.workspace, restrict_to_workspace=self.restrict_to_workspace))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
+        self.tools.register(SpeakTool())
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(
