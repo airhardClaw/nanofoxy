@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import secrets
 import string
 import uuid
@@ -333,6 +334,88 @@ class OpenAICompatProvider(LLMProvider):
             }
         return {}
 
+    def _parse_textual_tool_calls(self, text: str) -> list[ToolCallRequest]:
+        """Parse tool calls from text that some models (like Liquid AI) generate.
+        
+        Supports patterns like:
+        - <|tool_call_start|>[tool_name(arg1="val1")]<|tool_call_end|>
+        - <|tool_call_start|>[{"name": "tool_name", "arguments": {...}}]<|tool_call_end|>
+        - tool_name(arg1="val1") (without special tokens)
+        """
+        if not text:
+            return []
+
+        tool_calls = []
+        text = text.strip()
+
+        patterns = [
+            r'<\|tool_call_start\|>\[?([a-zA-Z_][a-zA-Z0-9_]*)\((.*?)\)\]?<\|tool_call_end\|>',
+            r'<\|tool_call_start\|>(\{.*?"name".*?"arguments".*?\})<\|tool_call_end\|>',
+        ]
+
+        for match in re.finditer(patterns[0], text, re.DOTALL):
+            name = match.group(1)
+            args_str = match.group(2)
+            args = self._parse_python_args(args_str)
+            if name and args is not None:
+                tool_calls.append(ToolCallRequest(
+                    id=_short_tool_id(),
+                    name=name,
+                    arguments=args,
+                ))
+
+        if not tool_calls:
+            for match in re.finditer(patterns[1], text, re.DOTALL):
+                try:
+                    data = json_repair.loads(match.group(1))
+                    name = data.get("name", "")
+                    args = data.get("arguments", {})
+                    if isinstance(args, str):
+                        args = json_repair.loads(args)
+                    if name and isinstance(args, dict):
+                        tool_calls.append(ToolCallRequest(
+                            id=_short_tool_id(),
+                            name=name,
+                            arguments=args,
+                        ))
+                except Exception:
+                    continue
+
+        return tool_calls
+
+    def _parse_python_args(self, args_str: str) -> dict[str, Any]:
+        """Parse Python-style arguments like 'arg1="val1", arg2=123' to dict."""
+        if not args_str:
+            return {}
+
+        args = {}
+        patterns = [
+            r'(\w+)=(?:"([^"]*)")',
+            r"(\w+)=(?:'([^']*)')",
+            r'(\w+)=(\d+\.?\d*)',
+            r'(\w+)=(\w+)',
+        ]
+
+        remaining = args_str
+        for pattern in patterns:
+            for match in re.finditer(pattern, remaining):
+                key = match.group(1)
+                val = match.group(2)
+                if val is not None:
+                    try:
+                        if '.' in val and '.' in pattern:
+                            val = float(val)
+                        elif val.isdigit():
+                            val = int(val)
+                    except ValueError:
+                        pass
+                    args[key] = val
+                remaining = remaining[match.end():]
+                if match.end() >= len(remaining):
+                    break
+
+        return args
+
     def _parse(self, response: Any) -> LLMResponse:
         if isinstance(response, str):
             return LLMResponse(content=response, finish_reason="stop")
@@ -389,6 +472,9 @@ class OpenAICompatProvider(LLMProvider):
                     function_provider_specific_fields=fn_prov,
                 ))
 
+            if not parsed_tool_calls and content:
+                parsed_tool_calls = self._parse_textual_tool_calls(content)
+
             return LLMResponse(
                 content=content,
                 tool_calls=parsed_tool_calls,
@@ -429,6 +515,9 @@ class OpenAICompatProvider(LLMProvider):
                 provider_specific_fields=prov,
                 function_provider_specific_fields=fn_prov,
             ))
+
+        if not tool_calls and content:
+            tool_calls = self._parse_textual_tool_calls(content)
 
         return LLMResponse(
             content=content,

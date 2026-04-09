@@ -1,8 +1,10 @@
 """Context builder for assembling agent prompts."""
 
 import base64
+import json
 import mimetypes
 import platform
+import re
 from pathlib import Path
 from typing import Any
 
@@ -19,14 +21,33 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
+    _LIQUID_KEYWORDS = ("liquid", "lfm2", "lfm2.5", "liquidai")
+
     def __init__(self, workspace: Path, timezone: str | None = None):
         self.workspace = workspace
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills."""
+    @staticmethod
+    def is_liquid_model(model: str | None) -> bool:
+        """Check if the model is a Liquid AI model."""
+        if not model:
+            return False
+        model_lower = model.lower()
+        return any(kw in model_lower for kw in ContextBuilder._LIQUID_KEYWORDS)
+
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """Build the system prompt from identity, bootstrap files, memory, and skills.
+        
+        For Liquid AI models, tool definitions are added to the system prompt
+        following the LFM2/LFM2.5 tool use format.
+        """
         parts = [self._get_identity()]
 
         bootstrap = self._load_bootstrap_files()
@@ -51,6 +72,12 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
+
+        if self.is_liquid_model(model) and tools:
+            parts.append(
+                f"List of tools: {json.dumps(tools, ensure_ascii=False)}\n"
+                "Output function calls as JSON."
+            )
 
         return "\n\n---\n\n".join(parts)
 
@@ -132,20 +159,32 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         channel: str | None = None,
         chat_id: str | None = None,
         current_role: str = "user",
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
-        """Build the complete message list for an LLM call."""
+        """Build the complete message list for an LLM call.
+        
+        Args:
+            history: Previous conversation messages
+            current_message: The current user message
+            skill_names: Optional list of skill names to include
+            media: Optional list of media file paths
+            channel: The channel (e.g., "cli", "telegram")
+            chat_id: The chat identifier
+            current_role: Current speaker role (default "user")
+            model: Model name for detection (e.g., to detect Liquid AI)
+            tools: Tool definitions to include in system prompt for Liquid AI
+        """
         runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone)
         user_content = self._build_user_content(current_message, media)
 
-        # Merge runtime context and user content into a single user message
-        # to avoid consecutive same-role messages that some providers reject.
         if isinstance(user_content, str):
             merged = f"{runtime_ctx}\n\n{user_content}"
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, model, tools)},
             *history,
             {"role": current_role, "content": merged},
         ]

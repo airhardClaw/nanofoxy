@@ -1,88 +1,66 @@
 {{- bos_token -}}
-{%- set ns = namespace(
-    system_prompt="",
-    last_assistant_index=-1,
-    has_tools=false
-) -%}
+{%- set ns = namespace(system_prompt="", last_assistant_index=-1) -%}
 {#- System Message -#}
 {%- if messages[0]["role"] == "system" -%}
     {%- set ns.system_prompt = messages[0]["content"] -%}
     {%- set messages = messages[1:] -%}
 {%- endif -%}
-{#- Tools as JSON -#}
+{#- Tools -#}
 {%- if tools -%}
-    {%- set ns.has_tools = true -%}
-    {%- set tool_list = [] -%}
+    {%- set tool_defs = [] -%}
     {%- for tool in tools -%}
         {%- if tool is not string -%}
-            {%- set tool_list = tool_list + [tool | tojson] -%}
+            {%- set tool_defs = tool_defs + [tool | tojson] -%}
         {%- else -%}
-            {%- set tool_list = tool_list + [tool] -%}
+            {%- set tool_defs = tool_defs + [tool] -%}
         {%- endif -%}
     {%- endfor -%}
-    {%- set ns.system_prompt = ns.system_prompt ~ "\n\nTools: " ~ (tool_list | join(", ")) -%}
+    {%- set ns.system_prompt = ns.system_prompt + "\n\nTools: " + tool_defs | join(", ") -%}
 {%- endif -%}
 {#- System Prompt -#}
 {%- if ns.system_prompt -%}
 <|im_start|>system
 {{ ns.system_prompt }}<|im_end|>
 {%- endif -%}
-{#- Find last assistant message index -#}
+{#- Find last assistant -#}
 {%- for message in messages -%}
     {%- if message["role"] == "assistant" -%}
         {%- set ns.last_assistant_index = loop.index0 -%}
     {%- endif -%}
 {%- endfor -%}
-{#- Process messages -#}
+{#- Messages -#}
 {%- for message in messages -%}
 <|im_start|>{{ message["role"] }}
 {%- set role = message["role"] -%}
-{#- Handle content: None → empty string -#}
 {%- if role == "tool" -%}
-{%- set content = "" -%}
-{%- if message["content"] is string -%}
-    {%- set content = message["content"] -%}
-{%- elif message["content"] -%}
-    {%- set content = message["content"] | tojson -%}
-{%- endif -%}
 {%- if message["name"] -%}
-Tool '{{ message["name"] }}' returned: {{ content }}
-{%- else -%}
-{{ content }}
+Tool '{{ message["name"] }}' returned:
+{%- endif -%}
+{%- if message["content"] is string -%}
+{{ message["content"] }}
+{%- elif message["content"] -%}
+{{ message["content"] | tojson }}
 {%- endif -%}
 {%- elif role == "assistant" -%}
-{#- Assistant message -#}
-{%- set content = "" -%}
 {%- if message["content"] is string -%}
-    {%- set content = message["content"] -%}
+{{ message["content"] }}
 {%- elif message["content"] -%}
-    {%- set content = message["content"] | tojson -%}
+{{ message["content"] | tojson }}
 {%- endif -%}
-{#- Handle tool_calls -#}
+{#- Tool Calls -#}
 {%- set tc = message.get("tool_calls", []) -%}
 {%- if tc -%}
-{%- set tc_parts = [] -%}
+[TOOL_CALLS: 
 {%- for call in tc -%}
 {%- set func = call.get("function", {}) -%}
 {%- set fname = func.get("name", "unknown") -%}
 {%- set fargs = func.get("arguments", "") -%}
-{%- if fargs is string -%}
-{%- set tc_parts = tc_parts + [fname ~ "(" ~ fargs ~ ")"] -%}
-{%- else -%}
-{%- set tc_parts = tc_parts + [fname ~ "(" ~ (fargs | tojson) ~ ")"] -%}
-{%- endif -%}
+{%- if loop.index0 > 0 -%}, {%- endif -%}
+{{ fname }}({{ fargs }})
 {%- endfor -%}
-{%- set content = content ~ "\n[TOOL_CALLS: " ~ (tc_parts | join(", ")) ~ "]" if tc_parts else content -%}
+]
 {%- endif -%}
-{#- Remove old thinking if not last assistant -#}
-{%- if not keep_past_thinking and loop.index0 != ns.last_assistant_index -%}
-    {%- if "" in content -%}
-        {%- set content = content.split("")[-1] | trim -%}
-    {%- endif -%}
-{%- endif -%}
-{{ content }}
 {%- else -%}
-{#- User message -#}
 {%- if message["content"] is string -%}
 {{ message["content"] }}
 {%- elif message["content"] -%}
@@ -91,7 +69,6 @@ Tool '{{ message["name"] }}' returned: {{ content }}
 {%- endif -%}
 <|im_end|>
 {%- endfor -%}
-{#- Generation prompt -#}
 {%- if add_generation_prompt -%}
 <|im_start|>assistant
 {%- endif -%}

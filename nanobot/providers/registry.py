@@ -351,6 +351,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="http://localhost:1234/v1",
         native_api_base="http://localhost:1234/api/v1",
     ),
+    # Liquid AI via LM Studio / Ollama / vLLM
+    # LFM2/LFM2.5 models use special tool calling format
+    ProviderSpec(
+        name="liquid",
+        keywords=("liquid", "lfm2", "lfm2.5", "liquidai"),
+        env_key="",
+        display_name="Liquid AI",
+        backend="openai_compat",
+        is_local=True,
+        default_api_base="http://192.168.1.25:1234/v1",
+        native_api_base="http://192.168.1.25:1234/api/v1",
+    ),
     # === OpenVINO Model Server (direct, local, OpenAI-compatible at /v3) ===
     ProviderSpec(
         name="ovms",

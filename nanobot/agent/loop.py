@@ -490,6 +490,8 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
+                model=self.model,
+                tools=self.tools.get_definitions(),
             )
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
@@ -576,6 +578,8 @@ class AgentLoop:
                 current_message=msg.content,
                 media=msg.media if msg.media else None,
                 channel=msg.channel, chat_id=msg.chat_id,
+                model=self.model,
+                tools=self.tools.get_definitions(),
             )
         
         initial_messages = _build_messages(history)

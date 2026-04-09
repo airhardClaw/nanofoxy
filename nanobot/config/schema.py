@@ -48,19 +48,17 @@ class ChannelsConfig(Base):
 
 
 class AgentDefaults(Base):
-    """Default agent configuration optimized for Qwen2.5-8B via LM Studio."""
+    """Default agent configuration optimized for Liquid AI LFM2.5 via LM Studio."""
 
     workspace: str = "~/.nanobot/workspace"
-    model: str = "qwen2.5-8b-instruct"  # Optimized for local 8B model
-    provider: str = (
-        "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
-    )
-    max_tokens: int = 4096  # Reduced for 8B efficiency
-    context_window_tokens: int = 128_000  # Full context for Qwen2.5
-    temperature: float = 0.7  # Slightly higher for creativity
-    max_tool_iterations: int = 30  # Reduced - 8B is faster
-    reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
-    timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    model: str = "LiquidAI/LFM2.5-1.2B-Instruct-GGUF"  # Liquid AI model
+    provider: str = "liquid"  # Liquid AI provider
+    max_tokens: int = 4096
+    context_window_tokens: int = 32_000  # LFM2.5 context
+    temperature: float = 0.1  # Lower temperature for tool calling
+    max_tool_iterations: int = 30
+    reasoning_effort: str | None = None
+    timezone: str = "UTC"
 
 
 class AgentsConfig(Base):
@@ -129,6 +127,7 @@ class ProvidersConfig(Base):
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
     lmstudio: ProviderConfig = Field(default_factory=ProviderConfig)  # LM Studio (local, with native API support)
+    liquid: ProviderConfig = Field(default_factory=ProviderConfig)  # Liquid AI via LM Studio / Ollama / vLLM
     lmstudio_settings: LMStudioSettings = Field(default_factory=LMStudioSettings)
     ollama_settings: OllamaSettings = Field(default_factory=OllamaSettings)
 
