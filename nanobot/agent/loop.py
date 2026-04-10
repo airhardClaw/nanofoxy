@@ -254,6 +254,7 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        temperature: float | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop.
 
@@ -307,6 +308,7 @@ class AgentLoop:
             tools=self.tools,
             model=self.model,
             max_iterations=self.max_iterations,
+            temperature=temperature,
             hook=_LoopHook(),
             error_message="Sorry, I encountered an error calling the AI model.",
             concurrent_tools=True,
@@ -496,6 +498,7 @@ class AgentLoop:
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
+                temperature=0 if ContextBuilder.is_liquid_model(self.model) else None,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
@@ -571,11 +574,18 @@ class AgentLoop:
         retry_count = 0
         max_retries = 2
         all_msgs = []
+
+        current_message = msg.content
+        # Auto-inject command hints for Liquid AI models to avoid wrong shell commands
+        if ContextBuilder.is_liquid_model(self.model):
+            search_keywords = ("suche", "find", "suchen", "datei", "file", "search", "locate")
+            if any(kw in current_message.lower() for kw in search_keywords):
+                current_message = current_message + '\nshell command hint: find ~/.local/ -name "*.ics"'
         
         def _build_messages(h):
             return self.context.build_messages(
                 history=h,
-                current_message=msg.content,
+                current_message=current_message,
                 media=msg.media if msg.media else None,
                 channel=msg.channel, chat_id=msg.chat_id,
                 model=self.model,
