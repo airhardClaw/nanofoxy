@@ -13,69 +13,63 @@ metadata: {"nanobot":{"emoji":"📅","requires":{"bins":["python3"]}}}
 
 # GNOME Calendar
 
-Access calendar events synced through GNOME Online Accounts (Google Calendar).
+Manage calendar events using the local ICS file.
+
+## ICS File Location
+
+**Primary Calendar**: `/home/sir-airhard/.local/share/evolution/calendar/system/calendar.ics`
 
 ## How it Works
 
-Events are stored in GNOME's Evolution Data Server cache at `~/.cache/evolution/calendar/`. The tool reads these ICS files to list, create, edit, and delete events.
+Events are stored in the ICS file at `/home/sir-airhard/.local/share/evolution/calendar/system/calendar.ics`. Use read_file and edit_file to manage events.
 
-## Actions
+## CRITICAL: You MUST use tools
 
-### List Calendars
-Show all available calendars:
-```
-calendar(action="list_calendars")
-```
+When user asks to create calendar event, you MUST:
+1. FIRST read_file the ICS file
+2. THEN edit_file to add the event
 
-### List Events
-List events for a specific date or date range:
-```
-calendar(action="list", date="2026-04-06")
-calendar(action="list", date="2026-04-06", calendar_id="work")
-calendar(action="list", start="2026-04-01", end="2026-04-07")
-```
+Do NOT just explain - actually call the tools!
 
-### Add Event
-Create a new calendar event:
-```
-calendar(action="add", title="Team Meeting", start="2026-04-06T14:00", end="2026-04-06T15:00")
-calendar(action="add", title="Lunch", start="2026-04-06T12:00", end="2026-04-06T13:00", description="With client", location="Restaurant")
-```
+### Create Event - Step by Step
 
-### Edit Event
-Modify an existing event (requires UID):
-```
-calendar(action="edit", uid="abc123", title="New Title")
-```
+Step 1: Read the calendar file:
+{"tool": "read_file", "path": "/home/sir-airhard/.local/share/evolution/calendar/system/calendar.ics"}
+
+Step 2: Edit to add event - replace "END:VCALENDAR" with event block:
+{"tool": "edit_file", "path": "/home/sir-airhard/.local/share/evolution/calendar/system/calendar.ics", "old_string": "END:VCALENDAR", "new_string": "BEGIN:VEVENT\nUID:20260415@nanobot\nDTSTAMP:20260415T080000Z\nDTSTART:20260415T080000Z\nDTEND:20260415T090000Z\nSUMMARY:Blumen für meine Frau\nEND:VEVENT\nEND:VCALENDAR"}
 
 ### Delete Event
-Remove an event (requires UID):
-```
-calendar(action="delete", uid="abc123")
-```
+1. **Read** file to find the VEVENT block
+2. **Remove** entire block using `edit_file`
 
-## Parameters
+### Update Event
+1. **Read** file
+2. **Edit** specific fields using `edit_file`
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| action | string | Action: list_calendars, list, add, edit, delete |
-| calendar_id | string | Calendar identifier (optional, default: all) |
-| date | string | Single date (YYYY-MM-DD) |
-| start | string | Start datetime (ISO format) |
-| end | string | End datetime (ISO format) |
-| title | string | Event title |
-| description | string | Event description |
-| location | string | Event location |
-| uid | string | Event UID (for edit/delete) |
+## ICS Format Reference
 
-## Calendar IDs
+| Field | Required | Description |
+|-------|----------|-------------|
+| UID | Auto | Unique identifier (timestamp@nanobot) |
+| DTSTAMP | Auto | Creation timestamp |
+| DTSTART | Yes | Start time (UTC) |
+| DTEND | No | End time (UTC) |
+| SUMMARY | Yes | Event title |
+| DESCRIPTION | No | Event details |
+| LOCATION | No | Location |
 
-Use `list_calendars` to see available calendars. Common patterns:
-- Default system calendar: often "personal" or "system"
-- Google calendars: identified by email or custom names
+## Date Format
+- ICS: `YYYYMMDDTHHMMSSZ` (e.g., `20260415T143000Z`)
+- Human: `2026-04-15 14:30 UTC`
+
+## Example Workflow
+
+1. List events: Read calendar.ics
+2. Create: edit_file to insert VEVENT before END:VCALENDAR
+3. Delete: Remove BEGIN:VEVENT...END:VEVENT block
 
 ## Tips
 
-- Use "list_calendars" first to discover available calendar IDs
-- Get UID from "list" output to edit or delete specific events
-- All times are in local timezone
+- Always use UTC (Z suffix) for times
+- Generate unique UIDs: timestamp + random
