@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import json_repair
 import httpx
+from loguru import logger
 from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -20,10 +21,17 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 if TYPE_CHECKING:
     from nanobot.providers.registry import ProviderSpec
 
-_ALLOWED_MSG_KEYS = frozenset({
-    "role", "content", "tool_calls", "tool_call_id", "name",
-    "reasoning_content", "extra_content",
-})
+_ALLOWED_MSG_KEYS = frozenset(
+    {
+        "role",
+        "content",
+        "tool_calls",
+        "tool_call_id",
+        "name",
+        "reasoning_content",
+        "extra_content",
+    }
+)
 _ALNUM = string.ascii_letters + string.digits
 
 _STANDARD_TC_KEYS = frozenset({"id", "type", "index", "function"})
@@ -61,7 +69,9 @@ def _coerce_dict(value: Any) -> dict[str, Any] | None:
     return None
 
 
-def _extract_tc_extras(tc: Any) -> tuple[
+def _extract_tc_extras(
+    tc: Any,
+) -> tuple[
     dict[str, Any] | None,
     dict[str, Any] | None,
     dict[str, Any] | None,
@@ -77,14 +87,18 @@ def _extract_tc_extras(tc: Any) -> tuple[
     prov = None
     fn_prov = None
     if tc_dict is not None:
-        leftover = {k: v for k, v in tc_dict.items()
-                    if k not in _STANDARD_TC_KEYS and k != "extra_content" and v is not None}
+        leftover = {
+            k: v
+            for k, v in tc_dict.items()
+            if k not in _STANDARD_TC_KEYS and k != "extra_content" and v is not None
+        }
         if leftover:
             prov = leftover
         fn = _coerce_dict(tc_dict.get("function"))
         if fn is not None:
-            fn_leftover = {k: v for k, v in fn.items()
-                          if k not in _STANDARD_FN_KEYS and v is not None}
+            fn_leftover = {
+                k: v for k, v in fn.items() if k not in _STANDARD_FN_KEYS and v is not None
+            }
             if fn_leftover:
                 fn_prov = fn_leftover
     else:
@@ -166,9 +180,12 @@ class OpenAICompatProvider(LLMProvider):
         def _mark(msg: dict[str, Any]) -> dict[str, Any]:
             content = msg.get("content")
             if isinstance(content, str):
-                return {**msg, "content": [
-                    {"type": "text", "text": content, "cache_control": cache_marker},
-                ]}
+                return {
+                    **msg,
+                    "content": [
+                        {"type": "text", "text": content, "cache_control": cache_marker},
+                    ],
+                }
             if isinstance(content, list) and content:
                 nc = list(content)
                 nc[-1] = {**nc[-1], "cache_control": cache_marker}
@@ -334,7 +351,7 @@ class OpenAICompatProvider(LLMProvider):
             }
         return {}
 
-    def _parse_textual_tool_calls(self, text: str) -> list[ToolCallRequest]:
+def _parse_textual_tool_calls(self, text: str) -> list[ToolCallRequest]:
         """Parse tool calls from text that some models (like Liquid AI) generate.
         
         Supports patterns like:
@@ -342,14 +359,17 @@ class OpenAICompatProvider(LLMProvider):
         - <|tool_call_start|>[{"name": "tool_name", "arguments": {...}}]<|tool_call_end|>
         - tool_name(arg1="val1") (without special tokens)
         """
+        logger.info(f"[LFM] Parsing textual tool calls, text length: {len(text)}")
+        logger.debug(f"[LFM] Text preview: {text[:200]}...")
         if not text:
+            logger.debug("[LFM] Empty text, no tool calls parsed")
             return []
 
         tool_calls = []
         text = text.strip()
 
         patterns = [
-            r'<\|tool_call_start\|>\[?([a-zA-Z_][a-zA-Z0-9_]*)\((.*?)\)\]?<\|tool_call_end\|>',
+            r"<\|tool_call_start\|>\[?([a-zA-Z_][a-zA-Z0-9_]*)\((.*?)\)\]?<\|tool_call_end\|>",
             r'<\|tool_call_start\|>(\{.*?"name".*?"arguments".*?\})<\|tool_call_end\|>',
         ]
 
@@ -358,11 +378,13 @@ class OpenAICompatProvider(LLMProvider):
             args_str = match.group(2)
             args = self._parse_python_args(args_str)
             if name and args is not None:
-                tool_calls.append(ToolCallRequest(
-                    id=_short_tool_id(),
-                    name=name,
-                    arguments=args,
-                ))
+                tool_calls.append(
+                    ToolCallRequest(
+                        id=_short_tool_id(),
+                        name=name,
+                        arguments=args,
+                    )
+                )
 
         if not tool_calls:
             for match in re.finditer(patterns[1], text, re.DOTALL):
@@ -373,14 +395,20 @@ class OpenAICompatProvider(LLMProvider):
                     if isinstance(args, str):
                         args = json_repair.loads(args)
                     if name and isinstance(args, dict):
-                        tool_calls.append(ToolCallRequest(
-                            id=_short_tool_id(),
-                            name=name,
-                            arguments=args,
-                        ))
+                        tool_calls.append(
+                            ToolCallRequest(
+                                id=_short_tool_id(),
+                                name=name,
+                                arguments=args,
+                            )
+                        )
                 except Exception:
                     continue
 
+        logger.info(f"[LFM] Parsed {len(tool_calls)} tool calls from text")
+        if tool_calls:
+            for tc in tool_calls:
+                logger.debug(f"[LFM] Tool call: name={tc.name}, arguments={tc.arguments}")
         return tool_calls
 
     def _parse_python_args(self, args_str: str) -> dict[str, Any]:
@@ -392,8 +420,8 @@ class OpenAICompatProvider(LLMProvider):
         patterns = [
             r'(\w+)=(?:"([^"]*)")',
             r"(\w+)=(?:'([^']*)')",
-            r'(\w+)=(\d+\.?\d*)',
-            r'(\w+)=(\w+)',
+            r"(\w+)=(\d+\.?\d*)",
+            r"(\w+)=(\w+)",
         ]
 
         remaining = args_str
@@ -403,14 +431,14 @@ class OpenAICompatProvider(LLMProvider):
                 val = match.group(2)
                 if val is not None:
                     try:
-                        if '.' in val and '.' in pattern:
+                        if "." in val and "." in pattern:
                             val = float(val)
                         elif val.isdigit():
                             val = int(val)
                     except ValueError:
                         pass
                     args[key] = val
-                remaining = remaining[match.end():]
+                remaining = remaining[match.end() :]
                 if match.end() >= len(remaining):
                     break
 
@@ -433,7 +461,9 @@ class OpenAICompatProvider(LLMProvider):
                         finish_reason=str(response_map.get("finish_reason") or "stop"),
                         usage=self._extract_usage(response_map),
                     )
-                return LLMResponse(content="Error: API returned empty choices.", finish_reason="error")
+                return LLMResponse(
+                    content="Error: API returned empty choices.", finish_reason="error"
+                )
 
             choice0 = self._maybe_mapping(choices[0]) or {}
             msg0 = self._maybe_mapping(choice0.get("message")) or {}
@@ -463,16 +493,19 @@ class OpenAICompatProvider(LLMProvider):
                 if isinstance(args, str):
                     args = json_repair.loads(args)
                 ec, prov, fn_prov = _extract_tc_extras(tc)
-                parsed_tool_calls.append(ToolCallRequest(
-                    id=_short_tool_id(),
-                    name=str(fn.get("name") or ""),
-                    arguments=args if isinstance(args, dict) else {},
-                    extra_content=ec,
-                    provider_specific_fields=prov,
-                    function_provider_specific_fields=fn_prov,
-                ))
+                parsed_tool_calls.append(
+                    ToolCallRequest(
+                        id=_short_tool_id(),
+                        name=str(fn.get("name") or ""),
+                        arguments=args if isinstance(args, dict) else {},
+                        extra_content=ec,
+                        provider_specific_fields=prov,
+                        function_provider_specific_fields=fn_prov,
+                    )
+                )
 
             if not parsed_tool_calls and content:
+                logger.info("[LFM] No tool_calls in response, trying textual parsing")
                 parsed_tool_calls = self._parse_textual_tool_calls(content)
 
             return LLMResponse(
@@ -507,16 +540,19 @@ class OpenAICompatProvider(LLMProvider):
             if isinstance(args, str):
                 args = json_repair.loads(args)
             ec, prov, fn_prov = _extract_tc_extras(tc)
-            tool_calls.append(ToolCallRequest(
-                id=_short_tool_id(),
-                name=tc.function.name,
-                arguments=args,
-                extra_content=ec,
-                provider_specific_fields=prov,
-                function_provider_specific_fields=fn_prov,
-            ))
+            tool_calls.append(
+                ToolCallRequest(
+                    id=_short_tool_id(),
+                    name=tc.function.name,
+                    arguments=args,
+                    extra_content=ec,
+                    provider_specific_fields=prov,
+                    function_provider_specific_fields=fn_prov,
+                )
+            )
 
         if not tool_calls and content:
+            logger.info("[LFM] No native tool_calls, trying textual parsing")
             tool_calls = self._parse_textual_tool_calls(content)
 
         return LLMResponse(
@@ -537,10 +573,17 @@ class OpenAICompatProvider(LLMProvider):
         def _accum_tc(tc: Any, idx_hint: int) -> None:
             """Accumulate one streaming tool-call delta into *tc_bufs*."""
             tc_index: int = _get(tc, "index") if _get(tc, "index") is not None else idx_hint
-            buf = tc_bufs.setdefault(tc_index, {
-                "id": "", "name": "", "arguments": "",
-                "extra_content": None, "prov": None, "fn_prov": None,
-            })
+            buf = tc_bufs.setdefault(
+                tc_index,
+                {
+                    "id": "",
+                    "name": "",
+                    "arguments": "",
+                    "extra_content": None,
+                    "prov": None,
+                    "fn_prov": None,
+                },
+            )
             tc_id = _get(tc, "id")
             if tc_id:
                 buf["id"] = str(tc_id)
@@ -638,8 +681,13 @@ class OpenAICompatProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         kwargs = self._build_kwargs(
-            messages, tools, model, max_tokens, temperature,
-            reasoning_effort, tool_choice,
+            messages,
+            tools,
+            model,
+            max_tokens,
+            temperature,
+            reasoning_effort,
+            tool_choice,
         )
         try:
             return self._parse(await self._client.chat.completions.create(**kwargs))
@@ -658,8 +706,13 @@ class OpenAICompatProvider(LLMProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         kwargs = self._build_kwargs(
-            messages, tools, model, max_tokens, temperature,
-            reasoning_effort, tool_choice,
+            messages,
+            tools,
+            model,
+            max_tokens,
+            temperature,
+            reasoning_effort,
+            tool_choice,
         )
         kwargs["stream"] = True
         kwargs["stream_options"] = {"include_usage": True}

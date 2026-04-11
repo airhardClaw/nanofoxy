@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from nanobot.utils.helpers import current_time_str
 
 from nanobot.agent.memory import MemoryStore
@@ -44,7 +46,7 @@ class ContextBuilder:
         tools: list[dict[str, Any]] | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills.
-        
+
         For Liquid AI models, tool definitions are added to the system prompt
         following the LFM2/LFM2.5 tool use format.
         """
@@ -74,10 +76,33 @@ Skills with available="false" need dependencies installed first - you can try in
 {skills_summary}""")
 
         if self.is_liquid_model(model) and tools:
-            parts.append(
-                f"List of tools: {json.dumps(tools, ensure_ascii=False)}\n"
-                "Output function calls as JSON."
+            logger.info(
+                f"[LFM] Adding tool definitions for model: {model}, tool_count: {len(tools)}"
             )
+            tool_defs = json.dumps(tools, ensure_ascii=False)
+            logger.debug(f"[LFM] Tool definitions (first 500 chars): {tool_defs[:500]}")
+            parts.append(f"""# Tools for {model}
+
+## Available Tools
+{tool_defs}
+
+## How to Call Tools
+When you need to use a tool, output a JSON object between <|tool_call_start|> and <|tool_call_end|> tokens.
+
+Example:
+<|tool_call_start|>
+{{
+  "name": "bash",
+  "arguments": {{
+    "command": "ls -la /home/sir-airhard"
+  }}
+}}
+<|tool_call_end|>
+
+IMPORTANT:
+- Always use the exact tool name from the list above (e.g., "bash", "read", "write", "grep")
+- Output only the JSON, no additional text before or after the tool call tokens.
+- If no tool is needed, reply with text normally.""")
 
         return "\n\n---\n\n".join(parts)
 
@@ -130,7 +155,9 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
 
     @staticmethod
     def _build_runtime_context(
-        channel: str | None, chat_id: str | None, timezone: str | None = None,
+        channel: str | None,
+        chat_id: str | None,
+        timezone: str | None = None,
     ) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
         lines = [f"Current Time: {current_time_str(timezone)}"]
@@ -163,7 +190,7 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         tools: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call.
-        
+
         Args:
             history: Previous conversation messages
             current_message: The current user message
@@ -205,36 +232,46 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
             if not mime or not mime.startswith("image/"):
                 continue
             b64 = base64.b64encode(raw).decode()
-            images.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{b64}"},
-                "_meta": {"path": str(p)},
-            })
+            images.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                    "_meta": {"path": str(p)},
+                }
+            )
 
         if not images:
             return text
         return images + [{"type": "text", "text": text}]
 
     def add_tool_result(
-        self, messages: list[dict[str, Any]],
-        tool_call_id: str, tool_name: str, result: Any,
+        self,
+        messages: list[dict[str, Any]],
+        tool_call_id: str,
+        tool_name: str,
+        result: Any,
     ) -> list[dict[str, Any]]:
         """Add a tool result to the message list."""
-        messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
+        messages.append(
+            {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result}
+        )
         return messages
 
     def add_assistant_message(
-        self, messages: list[dict[str, Any]],
+        self,
+        messages: list[dict[str, Any]],
         content: str | None,
         tool_calls: list[dict[str, Any]] | None = None,
         reasoning_content: str | None = None,
         thinking_blocks: list[dict] | None = None,
     ) -> list[dict[str, Any]]:
         """Add an assistant message to the message list."""
-        messages.append(build_assistant_message(
-            content,
-            tool_calls=tool_calls,
-            reasoning_content=reasoning_content,
-            thinking_blocks=thinking_blocks,
-        ))
+        messages.append(
+            build_assistant_message(
+                content,
+                tool_calls=tool_calls,
+                reasoning_content=reasoning_content,
+                thinking_blocks=thinking_blocks,
+            )
+        )
         return messages
