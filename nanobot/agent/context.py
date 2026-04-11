@@ -100,9 +100,11 @@ Example:
 <|tool_call_end|>
 
 IMPORTANT:
+- Output function calls as JSON format (not Python-style).
 - Always use the exact tool name from the list above (e.g., "bash", "read", "write", "grep")
 - Output only the JSON, no additional text before or after the tool call tokens.
-- If no tool is needed, reply with text normally.""")
+- If no tool is needed, reply with text normally.
+- Tool results will be returned between <|tool_response_start|> and <|tool_response_end|> tokens.""")
 
         return "\n\n---\n\n".join(parts)
 
