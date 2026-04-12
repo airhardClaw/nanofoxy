@@ -351,9 +351,9 @@ class OpenAICompatProvider(LLMProvider):
             }
         return {}
 
-def _parse_textual_tool_calls(self, text: str) -> list[ToolCallRequest]:
+    def _parse_textual_tool_calls(self, text: str) -> list[ToolCallRequest]:
         """Parse tool calls from text that some models (like Liquid AI) generate.
-        
+
         Supports patterns like:
         - <|tool_call_start|>[tool_name(arg1="val1")]<|tool_call_end|>
         - <|tool_call_start|>[{"name": "tool_name", "arguments": {...}}]<|tool_call_end|>
