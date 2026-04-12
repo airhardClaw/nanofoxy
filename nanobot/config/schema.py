@@ -100,32 +100,8 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
-    azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
-    anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
-    openai: ProviderConfig = Field(default_factory=ProviderConfig)
-    openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
-    deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
-    groq: ProviderConfig = Field(default_factory=ProviderConfig)
-    zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
-    dashscope: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
-    ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
-    gemini: ProviderConfig = Field(default_factory=ProviderConfig)
-    moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
-    minimax: ProviderConfig = Field(default_factory=ProviderConfig)
-    mistral: ProviderConfig = Field(default_factory=ProviderConfig)
-    stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰)
-    qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Baidu Qianfan (百度千帆)
-    mimo: ProviderConfig = Field(default_factory=ProviderConfig)  # Xiaomi MiMo
-    aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
-    siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
-    volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
-    volcengine_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine Coding Plan
-    byteplus: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus (VolcEngine international)
-    byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
-    openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
-    github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
     lmstudio: ProviderConfig = Field(default_factory=ProviderConfig)  # LM Studio (local, with native API support)
     liquid: ProviderConfig = Field(default_factory=ProviderConfig)  # Liquid AI via LM Studio / Ollama / vLLM
     lmstudio_settings: LMStudioSettings = Field(default_factory=LMStudioSettings)
@@ -136,7 +112,7 @@ class HeartbeatConfig(Base):
     """Heartbeat service configuration."""
 
     enabled: bool = True
-    interval_s: int = 30 * 60  # 30 minutes
+    interval_s: int = 15 * 60  # 15 minutes
     keep_recent_messages: int = 8
 
 
@@ -151,7 +127,7 @@ class GatewayConfig(Base):
 class WebSearchConfig(Base):
     """Web search tool configuration."""
 
-    provider: str = "brave"  # brave, tavily, duckduckgo, searxng, jina
+    provider: str = "duckduckgo"  # brave, tavily, duckduckgo, searxng, jina
     api_key: str = ""
     base_url: str = ""  # SearXNG base URL
     max_results: int = 5
