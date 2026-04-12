@@ -221,7 +221,7 @@ class SkillsLoader:
                                 import ast
                                 try:
                                     metadata[key] = ast.literal_eval(value)
-                                except:
+                                except (ValueError, SyntaxError):
                                     metadata[key] = [value]
                             else:
                                 metadata[key] = [value]

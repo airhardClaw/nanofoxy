@@ -40,25 +40,25 @@ class DescribeRoleTool(Tool):
 
     async def execute(self, role: str, **kwargs: Any) -> str:
         role_file = self.ROLES_DIR / f"{role}.md"
-        
+
         if not role_file.exists():
             alt_name = role.replace("-", "-")
             if alt_name != role:
                 role_file = self.ROLES_DIR / f"{alt_name}.md"
-        
+
         if not role_file.exists():
             return f"Error: Role '{role}' not found in {self.ROLES_DIR}"
-        
+
         content = role_file.read_text(encoding="utf-8")
-        
+
         info: dict[str, Any] = {"role": role}
-        
+
         frontmatter_match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
         if frontmatter_match:
             fm = frontmatter_match.group(1)
             current_key = None
             current_list = []
-            
+
             for line in fm.split("\n"):
                 if line.startswith("  - "):
                     if current_key:
@@ -72,12 +72,12 @@ class DescribeRoleTool(Tool):
                     current_list = []
                     if value:
                         current_list = [value]
-            
+
             if current_key and current_list:
                 info[current_key] = current_list
-        
+
         main_content = content[frontmatter_match.end():] if frontmatter_match else content
-        
+
         lines = main_content.strip().split("\n")
         desc_lines = []
         in_description = False
@@ -88,34 +88,34 @@ class DescribeRoleTool(Tool):
                 desc_lines.append(line.strip())
             elif line.startswith("# ") and not line.startswith("##"):
                 in_description = True
-        
+
         if desc_lines:
             info["about"] = " ".join(desc_lines[:3])
-        
+
         role_name = info.get("name", role)
         if isinstance(role_name, list):
             role_name = role_name[0] if role_name else role
-        
+
         result = f"# {role_name}\n\n"
-        
+
         desc = info.get("description")
         if isinstance(desc, list):
             desc = desc[0] if desc else ""
         if desc:
             result += f"**Description**: {desc}\n\n"
-        
+
         about = info.get("about", "")
         if about:
             result += f"{about}\n\n"
-        
+
         tools = info.get("tools", [])
         if tools:
             result += f"**Available Tools**: {', '.join(tools)}\n\n"
-        
+
         excluded = info.get("excluded_tools", [])
         if excluded:
             result += f"**Excluded Tools**: {', '.join(excluded)}\n\n"
-        
+
         result += f"_Full details: {role_file}_"
-        
+
         return result

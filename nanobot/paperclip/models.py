@@ -2,12 +2,13 @@
 
 from datetime import datetime
 from typing import Optional
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class Issue(BaseModel):
     """Represents a Paperclip issue/task."""
-    
+
     id: str
     company_id: Optional[str] = None
     project_id: Optional[str] = None
@@ -30,22 +31,22 @@ class Issue(BaseModel):
     identifier: Optional[str] = None
     origin_kind: str = "manual"
     origin_id: Optional[str] = None
-    
+
     class Config:
         from_attributes = True
-    
+
     @property
     def is_todo(self) -> bool:
         return self.status == "todo"
-    
+
     @property
     def is_in_progress(self) -> bool:
         return self.status == "in_progress"
-    
+
     @property
     def is_done(self) -> bool:
         return self.status in ("done", "completed")
-    
+
     def to_summary(self) -> str:
         """Return a short summary of the issue."""
         return f"[{self.identifier or self.id[:8]}] {self.title} ({self.status})"
@@ -53,7 +54,7 @@ class Issue(BaseModel):
 
 class IssueComment(BaseModel):
     """Represents a comment on an issue."""
-    
+
     id: str
     company_id: str = Field(alias="companyId", default="")
     issue_id: str = Field(alias="issueId", default="")
@@ -62,13 +63,13 @@ class IssueComment(BaseModel):
     body: str
     created_at: Optional[datetime] = Field(default=None, alias="createdAt")
     updated_at: Optional[datetime] = Field(default=None, alias="updatedAt")
-    
+
     model_config = ConfigDict(populate_by_name=True)
 
 
 class IssueListResponse(BaseModel):
     """Response when listing issues."""
-    
+
     items: list[Issue] = Field(default_factory=list)
     total: int = 0
     page: int = 1
@@ -77,7 +78,7 @@ class IssueListResponse(BaseModel):
 
 class CreateIssueRequest(BaseModel):
     """Request to create a new issue."""
-    
+
     title: str
     description: Optional[str] = None
     status: str = "todo"
@@ -89,7 +90,7 @@ class CreateIssueRequest(BaseModel):
 
 class UpdateIssueRequest(BaseModel):
     """Request to update an issue."""
-    
+
     title: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
@@ -100,26 +101,26 @@ class UpdateIssueRequest(BaseModel):
 
 class Company(BaseModel):
     """Represents a Paperclip company."""
-    
+
     id: str
     name: str
     description: Optional[str] = None
     status: str = "active"
     issue_prefix: Optional[str] = None
     issue_counter: int = 0
-    
+
     class Config:
         from_attributes = True
 
 
 class Project(BaseModel):
     """Represents a Paperclip project."""
-    
+
     id: str
     company_id: str
     name: str
     description: Optional[str] = None
     status: str = "active"
-    
+
     class Config:
         from_attributes = True

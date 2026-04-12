@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
+
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
@@ -48,7 +49,7 @@ class HeartbeatService:
     Phase 2 (execution): only triggered when Phase 1 returns ``run``.  The
     ``on_execute`` callback runs the task through the full agent loop and
     returns the result to deliver.
-    
+
     Subagent Heartbeats: Optional per-subagent heartbeat tasks that run
     in parallel to the main heartbeat.
     """
@@ -193,7 +194,7 @@ class HeartbeatService:
                         await self.on_notify(response)
                     else:
                         logger.info("Heartbeat: silenced by post-run evaluation")
-                    
+
                     if self.on_documente:
                         asyncio.create_task(self._documente_async(tasks, response))
         except Exception:
@@ -221,10 +222,10 @@ class HeartbeatService:
         """Load subagent configurations from .subagents directory."""
         subagent_dir = self.workspace / ".subagents"
         configs = {}
-        
+
         if not subagent_dir.exists():
             return configs
-        
+
         # Load main config
         config_file = subagent_dir / "config.json"
         if config_file.exists():
@@ -235,7 +236,7 @@ class HeartbeatService:
                 group_chat = ""
         else:
             group_chat = ""
-        
+
         # Load individual subagent configs
         for config_file in subagent_dir.glob("*.json"):
             if config_file.name == "config.json":
@@ -243,7 +244,7 @@ class HeartbeatService:
             try:
                 subagent_config = json.loads(config_file.read_text(encoding="utf-8"))
                 subagent_id = config_file.stem
-                
+
                 # Check if subagent has heartbeat enabled
                 heartbeat_config = subagent_config.get("heartbeat", {})
                 if heartbeat_config.get("enabled", False):
@@ -255,7 +256,7 @@ class HeartbeatService:
                     }
             except json.JSONDecodeError:
                 continue
-        
+
         return configs
 
     def register_subagent_callback(self, subagent_id: str, callback: Callable[[str], Coroutine[Any, Any, str]]) -> None:
@@ -273,18 +274,18 @@ class HeartbeatService:
         """Run all enabled subagent heartbeats based on their intervals."""
         import time
         current_time = time.time()
-        
+
         configs = self.load_subagent_configs()
-        
+
         for subagent_id, config in configs.items():
             interval = config.get("interval_s", 1800)
             last_run = self._subagent_last_run.get(subagent_id, 0)
-            
+
             # Check if enough time has passed
             if current_time - last_run >= interval:
                 logger.info("Subagent heartbeat [{}]: checking tasks...", subagent_id)
                 self._subagent_last_run[subagent_id] = current_time
-                
+
                 task = config.get("task", "")
                 if task and subagent_id in self.subagent_callbacks:
                     try:

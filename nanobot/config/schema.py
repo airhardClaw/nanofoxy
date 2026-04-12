@@ -52,7 +52,7 @@ class AgentDefaults(Base):
 
     workspace: str = "~/.nanobot/workspace"
     model: str = "LiquidAI/LFM2.5-1.2B-Instruct-GGUF"  # Liquid AI model
-    provider: str = "liquid"  # Liquid AI provider
+    provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     max_tokens: int = 4096
     context_window_tokens: int = 32_000  # LFM2.5 context
     temperature: float = 0.1  # Lower temperature for tool calling
@@ -100,10 +100,11 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
-    vllm: ProviderConfig = Field(default_factory=ProviderConfig)
+    vllm: ProviderConfig = Field(default_factory=ProviderConfig)  # vLLM / any OpenAI-compatible local server
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
     lmstudio: ProviderConfig = Field(default_factory=ProviderConfig)  # LM Studio (local, with native API support)
     liquid: ProviderConfig = Field(default_factory=ProviderConfig)  # Liquid AI via LM Studio / Ollama / vLLM
+    groq: ProviderConfig = Field(default_factory=ProviderConfig)  # Groq (mainly for transcription)
     lmstudio_settings: LMStudioSettings = Field(default_factory=LMStudioSettings)
     ollama_settings: OllamaSettings = Field(default_factory=OllamaSettings)
 
@@ -294,6 +295,7 @@ class DreamingConfig(Base):
     enabled: bool = True
     timezone: str | None = None
     verbose_logging: bool = False
+    auto_code_review: bool = True  # Run code review after REM phase
     light: DreamingLightConfig = Field(default_factory=DreamingLightConfig)
     deep: DreamingDeepConfig = Field(default_factory=DreamingDeepConfig)
     rem: DreamingREMConfig = Field(default_factory=DreamingREMConfig)

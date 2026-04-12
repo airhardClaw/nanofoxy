@@ -9,7 +9,15 @@ from pathlib import Path
 from typing import Any, Callable, Coroutine
 
 from loguru import logger
-from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronRunRecord, CronSchedule, CronStore
+
+from nanobot.cron.types import (
+    CronJob,
+    CronJobState,
+    CronPayload,
+    CronRunRecord,
+    CronSchedule,
+    CronStore,
+)
 
 
 def _now_ms() -> int:
@@ -97,7 +105,7 @@ class CronService:
                     schedule_data = j.get("schedule", {})
                     if not schedule_data:
                         continue
-                    
+
                     jobs.append(CronJob(
                         id=j["id"],
                         name=j["name"],
@@ -197,7 +205,7 @@ class CronService:
 
         self.store_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         self._last_mtime = self.store_path.stat().st_mtime
-    
+
     async def start(self) -> None:
         """Start the cron service."""
         self._running = True

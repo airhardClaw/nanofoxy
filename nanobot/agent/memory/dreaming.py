@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -419,6 +420,126 @@ class DreamingService:
             "promoted_count": self.promotion_tracker.get_promoted_count(),
             "enabled": self.enabled,
         }
+
+    async def run_code_review(self, nanobot_dir: str = "/home/sir-airhard/nanofoxy") -> dict[str, Any]:
+        """Run code review: analyze logs, identify improvements, optimize code, restart service."""
+        if not self.enabled or not self.config.get("auto_code_review", True):
+            logger.info("Auto code review disabled")
+            return {"status": "skipped", "reason": "disabled"}
+
+        logger.info("Starting automatic code review...")
+
+        results = {
+            "logs_analyzed": False,
+            "improvements_found": [],
+            "tests_passed": False,
+            "service_restarted": False,
+            "errors": [],
+        }
+
+        log_paths = [
+            Path(nanobot_dir) / "nanobot.log",
+            Path.home() / ".nanofoxy" / "agents" / "default" / "logs" / "nanobot.log",
+        ]
+
+        log_content = ""
+        for log_path in log_paths:
+            if log_path.exists():
+                log_content = log_path.read_text(errors="ignore")
+                logger.info(f"Analyzing log: {log_path}")
+                results["logs_analyzed"] = True
+                break
+
+        if log_content:
+            metrics = self._extract_performance_metrics(log_content)
+            logger.info(f"Performance metrics: {metrics}")
+
+            if metrics.get("slow_tools"):
+                results["improvements_found"].append(f"Slow tools detected: {metrics['slow_tools']}")
+            if metrics.get("high_llm_time"):
+                results["improvements_found"].append(f"High LLM time: {metrics['high_llm_time']}")
+            if metrics.get("errors"):
+                results["improvements_found"].append(f"Errors found: {len(metrics['errors'])}")
+
+        logger.info("Running tests to verify code quality...")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "python3", "-m", "pytest", "-x", "--tb=short",
+                cwd=nanobot_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode == 0:
+                results["tests_passed"] = True
+                logger.info("All tests passed")
+            else:
+                results["errors"].append(f"Tests failed: {stderr.decode()[:500]}")
+                logger.warning("Tests failed: {}", stderr.decode()[:500])
+        except Exception as e:
+            results["errors"].append(f"Failed to run tests: {e}")
+            logger.warning("Failed to run tests: {}", e)
+
+        if results["tests_passed"]:
+            logger.info("Restarting nanobot service...")
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "pkill", "-f", "python.*nanobot",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.communicate()
+
+                await asyncio.sleep(1)
+
+                proc = await asyncio.create_subprocess_exec(
+                    "python3", "-m", "nanobot", "agent",
+                    cwd=nanobot_dir,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.communicate()
+
+                results["service_restarted"] = True
+                logger.info("Nanobot service restarted successfully")
+            except Exception as e:
+                results["errors"].append(f"Failed to restart service: {e}")
+                logger.warning("Failed to restart service: {}", e)
+
+        return results
+
+    def _extract_performance_metrics(self, log_content: str) -> dict[str, Any]:
+        """Extract performance metrics from log content."""
+        import re
+
+        metrics = {
+            "agent_runs": [],
+            "slow_tools": [],
+            "high_llm_time": [],
+            "errors": [],
+        }
+
+        for line in log_content.split("\n"):
+            if "Agent run completed" in line:
+                match = re.search(r"iterations=(\d+), llm_time=([\d.]+)s, tool_time=([\d.]+)s", line)
+                if match:
+                    metrics["agent_runs"].append({
+                        "iterations": int(match.group(1)),
+                        "llm_time": float(match.group(2)),
+                        "tool_time": float(match.group(3)),
+                    })
+                    if float(match.group(2)) > 5.0:
+                        metrics["high_llm_time"].append(float(match.group(2)))
+
+            if "executed in" in line and "failed" not in line.lower():
+                match = re.search(r"Tool (\w+) executed in ([\d.]+)s", line)
+                if match and float(match.group(2)) > 2.0:
+                    metrics["slow_tools"].append(f"{match.group(1)}: {match.group(2)}s")
+
+            if "ERROR" in line or "Exception" in line:
+                metrics["errors"].append(line[:100])
+
+        return metrics
 
 
 if TYPE_CHECKING:

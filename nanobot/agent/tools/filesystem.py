@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+
 from nanobot.agent.tools.base import Tool
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
@@ -65,14 +66,14 @@ class _FsTool(Tool):
         """Create a timestamped backup of the file before writing."""
         if not file_path.exists():
             return None
-        
+
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_file = self._get_backup_dir(file_path) / f"{timestamp}.bak"
-            
+
             backup_file.write_bytes(file_path.read_bytes())
             self._cleanup_old_file_backups(file_path)
-            
+
             logger.debug("Created backup: {}", backup_file)
             return backup_file
         except Exception as e:
@@ -97,7 +98,7 @@ class _FsTool(Tool):
         """List available backups for a file."""
         fp = self._resolve(file_path)
         backup_dir = self._get_backup_dir(fp)
-        
+
         backups = []
         for b in sorted(backup_dir.glob("*.bak"), key=lambda p: p.stat().st_mtime, reverse=True):
             backups.append({
@@ -240,10 +241,10 @@ class WriteFileTool(_FsTool):
             if content is None:
                 raise ValueError("Unknown content")
             fp = self._resolve(path)
-            
+
             if create_backup and fp.exists():
                 self._create_file_backup(fp)
-            
+
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
             return f"Successfully wrote {len(content)} bytes to {fp}"
@@ -269,13 +270,13 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
     old_lines = old_text.splitlines()
     if not old_lines:
         return None, 0
-    stripped_old = [l.strip() for l in old_lines]
+    stripped_old = [line.strip() for line in old_lines]
     content_lines = content.splitlines()
 
     candidates = []
     for i in range(len(content_lines) - len(stripped_old) + 1):
         window = content_lines[i : i + len(stripped_old)]
-        if [l.strip() for l in window] == stripped_old:
+        if [line.strip() for line in window] == stripped_old:
             candidates.append("\n".join(window))
 
     if candidates:
@@ -501,13 +502,13 @@ class RestoreFileBackupTool(_FsTool):
         try:
             if not path:
                 raise ValueError("Unknown path")
-            
+
             fp = self._resolve(path)
             backup_dir = self._get_backup_dir(fp)
-            
+
             if not backup_dir.exists():
                 return f"Error: No backups found for {path}"
-            
+
             if timestamp:
                 backup_file = backup_dir / f"{timestamp}.bak"
                 if not backup_file.exists():
@@ -517,7 +518,7 @@ class RestoreFileBackupTool(_FsTool):
                 if not backups:
                     return f"Error: No backups found for {path}"
                 backup_file = backups[0]
-            
+
             fp.write_bytes(backup_file.read_bytes())
             return f"Restored {fp} from backup {backup_file.name}"
         except PermissionError as e:
@@ -555,17 +556,17 @@ class ListFileBackupsTool(_FsTool):
         try:
             if not path:
                 raise ValueError("Unknown path")
-            
-            fp = self._resolve(path)
+
+            self._resolve(path)
             backups = self.list_file_backups(path)
-            
+
             if not backups:
                 return f"No backups found for {path}"
-            
+
             lines = [f"Backups for {path}:"]
             for b in backups:
                 lines.append(f"  - {b['created']} ({b['size']} bytes)")
-            
+
             return "\n".join(lines)
         except PermissionError as e:
             return f"Error: {e}"

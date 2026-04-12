@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import os
 import time
 from contextlib import AsyncExitStack, nullcontext
@@ -12,16 +11,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
+
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.memory import MemoryConsolidator, QMDEngine
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.gnome_calendar import GNOMECalendarTool
-from nanobot.agent.skills import BUILTIN_SKILLS_DIR
-from nanobot.utils.helpers import smart_truncate_messages
-from nanobot.providers.base import LLMProvider
 from nanobot.agent.tools.filesystem import (
     EditFileTool,
     ListDirTool,
@@ -30,21 +27,23 @@ from nanobot.agent.tools.filesystem import (
     RestoreFileBackupTool,
     WriteFileTool,
 )
+from nanobot.agent.tools.gnome_calendar import GNOMECalendarTool
 from nanobot.agent.tools.memory import MemoryTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.speak import SpeakTool
 from nanobot.agent.tools.roles import DescribeRoleTool
+from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.speak import SpeakTool
 from nanobot.agent.tools.system import SystemMonitorTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
-from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
+from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.helpers import smart_truncate_messages
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
@@ -134,17 +133,17 @@ class AgentLoop:
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
         )
-        
+
         self._memory_config = memory_config or {}
         self._qmd_engine: QMDEngine | None = None
-        
+
         if self._memory_config.get("backend") == "qmd":
             self._qmd_engine = QMDEngine(
                 workspace=workspace,
                 agent_id=agent_id,
                 config=self._memory_config.get("qmd", {}),
             )
-        
+
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
             provider=provider,
@@ -327,10 +326,10 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
-        
+
         if self._qmd_engine:
             await self._qmd_engine.initialize()
-        
+
         logger.info("Agent loop started")
 
         while self._running:
@@ -438,10 +437,10 @@ class AgentLoop:
     async def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
-        
+
         if self._qmd_engine:
             await self._qmd_engine.shutdown()
-        
+
         logger.info("Agent loop stopping")
 
     async def _process_message(
@@ -453,27 +452,28 @@ class AgentLoop:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        start_time = time.perf_counter()
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
                                 else ("cli", msg.chat_id))
             logger.info("Processing system message from {}", msg.sender_id)
-            
+
             # Check if this is a subagent result that needs routing
             if msg.metadata.get("_subagent_result"):
                 subagent_role = msg.metadata.get("_subagent_role", "")
                 original_chat_id = msg.metadata.get("_original_chat_id", chat_id)
                 logger.info("Subagent result received: role={}, original_chat_id={}", subagent_role, original_chat_id)
-                
+
                 # Extract just the result from the content (skip the "Task:" and "Result:" labels)
                 result_content = msg.content
                 # Try to extract just the result part
                 if "Result:" in msg.content:
                     result_content = msg.content.split("Result:")[1].strip()
-                
+
                 # Extract original channel from chat_id prefix (format: "channel:chat_id")
                 original_channel = msg.chat_id.split(":")[0] if ":" in msg.chat_id else "telegram"
-                
+
                 # Send result to the original chat via the correct bot
                 return OutboundMessage(
                     channel=original_channel,
@@ -481,7 +481,7 @@ class AgentLoop:
                     content=result_content,
                     metadata={"_from_subagent": True, "_subagent_id": subagent_role},
                 )
-            
+
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
@@ -517,7 +517,7 @@ class AgentLoop:
         else:
             # Fallback: derive from channel and chat_id
             key = f"{msg.channel}:{msg.chat_id}"
-        
+
         session = self.sessions.get_or_create(key)
 
         # Check if this is a subagent request (from Telegram routing)
@@ -525,9 +525,9 @@ class AgentLoop:
         if subagent_id:
             subagent_role = msg.metadata.get("_subagent_role", "")
             subagent_task = msg.metadata.get("_subagent_task", msg.content)
-            
+
             logger.info("Routing to subagent {} with role {}", subagent_id, subagent_role)
-            
+
             # Spawn the subagent with role
             result = await self.subagents.spawn_with_role(
                 task=subagent_task,
@@ -537,7 +537,7 @@ class AgentLoop:
                 origin_chat_id=msg.chat_id,
                 session_key=key,
             )
-            
+
             # Return response that subagent will complete later
             return OutboundMessage(
                 channel=msg.channel,
@@ -553,7 +553,7 @@ class AgentLoop:
             return result
 
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
-        
+
         await self.memory_consolidator.pre_consolidate_if_needed(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
@@ -581,7 +581,7 @@ class AgentLoop:
             search_keywords = ("suche", "find", "suchen", "datei", "file", "search", "locate")
             if any(kw in current_message.lower() for kw in search_keywords):
                 current_message = current_message + '\nshell command hint: find ~/.local/ -name "*.ics"'
-        
+
         def _build_messages(h):
             return self.context.build_messages(
                 history=h,
@@ -591,9 +591,9 @@ class AgentLoop:
                 model=self.model,
                 tools=self.tools.get_definitions(),
             )
-        
+
         initial_messages = _build_messages(history)
-        
+
         while retry_count <= max_retries:
             try:
                 final_content, _, all_msgs = await self._run_agent_loop(
@@ -605,13 +605,13 @@ class AgentLoop:
                     message_id=msg.metadata.get("message_id"),
                 )
                 break
-            except LLMProvider.ContextWindowError as e:
+            except LLMProvider.ContextWindowError:
                 retry_count += 1
                 logger.warning(
                     "Context window error (attempt {}/{}), truncating messages and retrying",
                     retry_count, max_retries + 1,
                 )
-                
+
                 budget = self.memory_consolidator.context_window_tokens - self.memory_consolidator.max_completion_tokens - 1024
                 truncated_history = smart_truncate_messages(
                     history,
@@ -619,7 +619,7 @@ class AgentLoop:
                     tools=self.tools.get_definitions(),
                 )
                 initial_messages = _build_messages(truncated_history)
-                
+
                 if retry_count > max_retries:
                     logger.error("Context window error: max retries exceeded")
                     final_content = "Context window exceeded after multiple attempts. Please try a shorter message."
@@ -641,6 +641,14 @@ class AgentLoop:
         meta = dict(msg.metadata or {})
         if on_stream is not None:
             meta["_streamed"] = True
+
+        elapsed = time.perf_counter() - start_time
+        logger.info(
+            "Message processed in {:.3f}s for {}:{} - {} chars in, {} chars out",
+            elapsed, msg.channel, msg.sender_id,
+            len(msg.content), len(final_content or ""),
+        )
+
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=meta,

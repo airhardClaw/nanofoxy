@@ -823,18 +823,21 @@ _SETTINGS_SECTIONS: dict[str, tuple[str, str, set[str] | None]] = {
     "Agent Settings": ("Agent Defaults", "Configure default model, temperature, and behavior", None),
     "Gateway": ("Gateway Settings", "Configure server host, port, and heartbeat", None),
     "Tools": ("Tools Settings", "Configure web search, shell exec, and other tools", {"mcp_servers"}),
+    "Memory": ("Memory & Dreaming", "Configure memory consolidation and auto code review", {"light", "deep", "rem"}),
 }
 
 _SETTINGS_GETTER = {
     "Agent Settings": lambda c: c.agents.defaults,
     "Gateway": lambda c: c.gateway,
     "Tools": lambda c: c.tools,
+    "Memory": lambda c: c.tools.memory.dreaming,
 }
 
 _SETTINGS_SETTER = {
     "Agent Settings": lambda c, v: setattr(c.agents, "defaults", v),
     "Gateway": lambda c, v: setattr(c, "gateway", v),
     "Tools": lambda c, v: setattr(c, "tools", v),
+    "Memory": lambda c, v: setattr(c.tools.memory, "dreaming", v),
 }
 
 
@@ -917,6 +920,7 @@ def _show_summary(config: Config) -> None:
         ("Agent Settings", config.agents.defaults),
         ("Gateway", config.gateway),
         ("Tools", config.tools),
+        ("Memory & Dreaming", config.tools.memory.dreaming),
         ("Channel Common", config.channels),
     ]:
         _print_summary_panel(_summarize_model(model), title)
@@ -987,6 +991,7 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
                     "[A] Agent Settings",
                     "[G] Gateway",
                     "[T] Tools",
+                    "[M] Memory & Dreaming",
                     "[V] View Configuration Summary",
                     "[S] Save and Exit",
                     "[X] Exit Without Saving",
@@ -1010,6 +1015,7 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
             "[A] Agent Settings": lambda: _configure_general_settings(config, "Agent Settings"),
             "[G] Gateway": lambda: _configure_general_settings(config, "Gateway"),
             "[T] Tools": lambda: _configure_general_settings(config, "Tools"),
+            "[M] Memory & Dreaming": lambda: _configure_general_settings(config, "Memory"),
             "[V] View Configuration Summary": lambda: _show_summary(config),
         }
 

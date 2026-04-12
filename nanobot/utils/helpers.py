@@ -69,7 +69,7 @@ def current_time_str(timezone: str | None = None) -> str:
         'CEST': 'Europe/Berlin',
         'BST': 'Europe/Berlin',
     }
-    
+
     def parse_offset_to_timedelta(tz_str: str) -> timedelta | None:
         """Parse offset strings like 'UTC+1', 'GMT+2', '+1' into timedelta."""
         match = re.match(r'^(UTC|GMT)?([+-])?(\d+)$', tz_str.upper().strip())
@@ -82,14 +82,14 @@ def current_time_str(timezone: str | None = None) -> str:
         return None
 
     tz = None
-    
+
     if timezone:
         normalized = IANA_MAP.get(timezone.upper())
         if normalized:
             try:
                 from zoneinfo import ZoneInfo
                 tz = ZoneInfo(normalized)
-            except:
+            except Exception:
                 pass
         else:
             delta = parse_offset_to_timedelta(timezone)
@@ -100,9 +100,9 @@ def current_time_str(timezone: str | None = None) -> str:
                 try:
                     from zoneinfo import ZoneInfo
                     tz = ZoneInfo(timezone)
-                except:
+                except Exception:
                     pass
-    
+
     now = datetime.now(tz=tz) if tz else datetime.now().astimezone()
     offset = now.strftime("%z")
     offset_fmt = f"{offset[:3]}:{offset[3:]}" if len(offset) == 5 else offset
@@ -300,7 +300,7 @@ def smart_truncate_messages(
     tools: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Intelligently truncate messages to fit within token budget.
-    
+
     Priority order:
     1. Keep last 2 user-assistant pairs (most important for context)
     2. Keep tool definitions
@@ -309,10 +309,10 @@ def smart_truncate_messages(
     """
     if not messages:
         return messages
-    
+
     def estimate_message(msg: dict[str, Any]) -> int:
         return estimate_message_tokens(msg)
-    
+
     current_tokens = sum(estimate_message(m) for m in messages)
     if tools:
         try:
@@ -321,42 +321,42 @@ def smart_truncate_messages(
         except Exception:
             tools_tokens = len(json.dumps(tools)) // 4
         current_tokens += tools_tokens
-    
+
     if current_tokens <= max_tokens:
         return messages
-    
+
     result = []
     found_recent_pairs = 0
     recent_pairs: list[dict[str, Any]] = []
-    
+
     for msg in messages:
         msg_copy = dict(msg)
         role = msg_copy.get("role")
-        
+
         if role == "user":
             result.append(msg_copy)
             found_recent_pairs += 1
             recent_pairs.append(msg_copy)
             continue
-        
+
         if role == "assistant":
             result.append(msg_copy)
             if msg_copy.get("content") or msg_copy.get("tool_calls"):
                 recent_pairs.append(msg_copy)
-            
+
             if msg_copy.get("reasoning_content") and len(msg_copy.get("reasoning_content", "")) > 500:
                 msg_copy["reasoning_content"] = msg_copy["reasoning_content"][:500] + "..."
             continue
-        
+
         if role == "tool":
             content = msg_copy.get("content")
             if isinstance(content, str) and len(content) > 4000:
                 msg_copy["content"] = content[:4000] + "\n... (truncated)"
             result.append(msg_copy)
             continue
-        
+
         result.append(msg_copy)
-    
+
     current_tokens = sum(estimate_message(m) for m in result)
     if tools:
         try:
@@ -365,20 +365,20 @@ def smart_truncate_messages(
         except Exception:
             tools_tokens = len(json.dumps(tools)) // 4
         current_tokens += tools_tokens
-    
+
     if current_tokens <= max_tokens:
         return result
-    
+
     for msg in result:
         if msg.get("role") == "tool":
             content = msg.get("content")
             if isinstance(content, str) and len(content) > 2000:
                 msg["content"] = content[:2000] + "\n... (truncated)"
             continue
-        
+
         if msg.get("role") == "assistant" and msg.get("reasoning_content"):
             msg["reasoning_content"] = "[reasoning truncated]"
-    
+
     return result
 
 
@@ -440,12 +440,12 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
     _write(None, workspace / "memory" / "HISTORY.md")
     (workspace / "skills").mkdir(exist_ok=True)
-    
+
     # Sync roles
     try:
         roles_src = pkg_files("nanobot") / "roles"
         roles_tpl = tpl / "roles"
-        
+
         # First copy from package if exists
         if roles_src.is_dir():
             (workspace / "roles").mkdir(parents=True, exist_ok=True)
@@ -466,7 +466,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
                         added.append(f"roles/{role_file.name}")
     except Exception:
         pass
-    
+
     # Sync subagents config directory
     subagent_dir = workspace / ".subagents"
     if not subagent_dir.exists():
@@ -479,7 +479,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
                 "subagents": {}
             }, indent=2), encoding="utf-8")
             added.append(".subagents/config.json")
-        
+
         # Copy subagent config templates
         try:
             subagent_templates = tpl / ".subagents"
@@ -492,7 +492,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
                             added.append(f".subagents/{template_file.name}")
         except Exception:
             pass
-    
+
     # Sync subagent memory directories
     subagent_memory_dir = workspace / "memory" / "subagents"
     subagent_names = ["coding_expert", "websearch_expert", "file_handel_expert", "information_expert"]

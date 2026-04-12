@@ -3,7 +3,7 @@
 import time
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request
+from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 
 router = APIRouter(prefix="/api")
 
@@ -152,19 +152,18 @@ async def get_config(request: Request) -> dict[str, Any]:
             channels = config.channels
             if channels:
                 channel_data = channels.model_dump() if hasattr(channels, 'model_dump') else {}
-                sensitive_patterns = ['token', 'password', 'secret', 'api_key', 'apikey', 'appsecret', 'clientsecret', 
+                sensitive_patterns = ['token', 'password', 'secret', 'api_key', 'apikey', 'appsecret', 'clientsecret',
                                       'accesstoken', 'webhook', 'encryptkey', 'verification', 'imap', 'smtp',
                                       'cookie', 'auth', 'bottoken']
-                
+
                 for key, val in channel_data.items():
                     if key.startswith('_'):
                         continue
                     if callable(val):
                         continue
-                    
+
                     if isinstance(val, dict):
                         filtered_val = {}
-                        has_enabled = False
                         for sub_key, sub_val in val.items():
                             sub_key_lower = sub_key.lower()
                             if any(pattern in sub_key_lower for pattern in sensitive_patterns):
@@ -175,7 +174,7 @@ async def get_config(request: Request) -> dict[str, Any]:
                             else:
                                 filtered_val[sub_key] = sub_val
                                 if sub_key == 'enabled':
-                                    has_enabled = sub_val
+                                    pass
                         result["channels"][key] = filtered_val
                     elif isinstance(val, bool):
                         result["channels"][key] = {"enabled": val}
@@ -191,7 +190,6 @@ async def get_config(request: Request) -> dict[str, Any]:
 async def websocket_events(websocket: WebSocket):
     """WebSocket endpoint for real-time events."""
     await websocket.accept()
-    request = websocket.app.state
 
     try:
         while True:
@@ -401,12 +399,12 @@ async def list_subagents(request: Request) -> list[dict[str, Any]]:
     workspace = request.app.state.config.workspace_path if request.app.state.config else None
     if not workspace:
         return []
-    
+
     import json
     subagent_dir = workspace / ".subagents"
     if not subagent_dir.exists():
         return []
-    
+
     subagents = []
     for config_file in subagent_dir.glob("*.json"):
         if config_file.name == "config.json":
@@ -424,7 +422,7 @@ async def list_subagents(request: Request) -> list[dict[str, Any]]:
             })
         except Exception:
             pass
-    
+
     return subagents
 
 
@@ -438,12 +436,12 @@ async def list_files(request: Request, path: str = "") -> dict[str, Any]:
     workspace = request.app.state.config.workspace_path if request.app.state.config else None
     if not workspace:
         return {"error": "No workspace"}
-    
+
     target_path = (workspace / path) if path else workspace
-    
+
     if not target_path.exists():
         return {"error": "Path not found"}
-    
+
     if target_path.is_file():
         # Return file content
         content = target_path.read_text(encoding="utf-8")
@@ -453,7 +451,7 @@ async def list_files(request: Request, path: str = "") -> dict[str, Any]:
             "path": str(target_path.relative_to(workspace)),
             "content": content,
         }
-    
+
     # Return directory contents
     items = []
     for item in sorted(target_path.iterdir()):
@@ -464,7 +462,7 @@ async def list_files(request: Request, path: str = "") -> dict[str, Any]:
             "path": str(item.relative_to(workspace)),
             "hidden": item.name.startswith("."),
         })
-    
+
     return {"type": "directory", "items": items}
 
 
@@ -474,11 +472,11 @@ async def read_file(request: Request, file_path: str) -> dict[str, Any]:
     workspace = request.app.state.config.workspace_path if request.app.state.config else None
     if not workspace:
         return {"error": "No workspace"}
-    
+
     target_path = workspace / file_path
     if not target_path.exists() or not target_path.is_file():
         return {"error": "File not found"}
-    
+
     content = target_path.read_text(encoding="utf-8")
     return {
         "name": target_path.name,
@@ -493,11 +491,11 @@ async def save_file(request: Request, file_path: str) -> dict[str, str]:
     workspace = request.app.state.config.workspace_path if request.app.state.config else None
     if not workspace:
         return {"status": "error", "message": "No workspace"}
-    
+
     target_path = workspace / file_path
     if not target_path.exists():
         return {"status": "error", "message": "File not found"}
-    
+
     try:
         body = await request.body()
         content = body.decode("utf-8")

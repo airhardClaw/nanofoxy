@@ -76,7 +76,7 @@ class SpawnTool(Tool):
                 origin_chat_id=self._origin_chat_id,
                 session_key=self._session_key,
             )
-        
+
         # Default: use regular spawn
         return await self._manager.spawn(
             task=task,

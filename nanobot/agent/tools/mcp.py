@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 from loguru import logger
+
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 

@@ -1,9 +1,9 @@
 """Memory system - dual backend support for builtin and QMD."""
 
-from nanobot.agent.memory.store import MemoryStore
 from nanobot.agent.memory.consolidator import MemoryConsolidator
+from nanobot.agent.memory.dreaming import DailyNoteManager, DreamingService, ShortTermRecallStore
 from nanobot.agent.memory.qmd_engine import QMDEngine
-from nanobot.agent.memory.dreaming import DreamingService, ShortTermRecallStore, DailyNoteManager
+from nanobot.agent.memory.store import MemoryStore
 
 # Re-export helpers for backwards compatibility
 from nanobot.utils.helpers import estimate_message_tokens, estimate_prompt_tokens_chain

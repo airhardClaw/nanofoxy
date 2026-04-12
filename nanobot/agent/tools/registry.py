@@ -1,6 +1,9 @@
 """Tool registry for dynamic tool management."""
 
+import time
 from typing import Any
+
+from loguru import logger
 
 from nanobot.agent.tools.base import Tool
 
@@ -43,19 +46,22 @@ class ToolRegistry:
         if not tool:
             return f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
 
+        start_time = time.perf_counter()
         try:
-            # Attempt to cast parameters to match schema types
             params = tool.cast_params(params)
-            
-            # Validate parameters
+
             errors = tool.validate_params(params)
             if errors:
                 return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _HINT
             result = await tool.execute(**params)
             if isinstance(result, str) and result.startswith("Error"):
                 return result + _HINT
+            elapsed = time.perf_counter() - start_time
+            logger.debug("Tool {} executed in {:.3f}s", name, elapsed)
             return result
         except Exception as e:
+            elapsed = time.perf_counter() - start_time
+            logger.warning("Tool {} failed after {:.3f}s: {}", name, elapsed, e)
             return f"Error executing {name}: {str(e)}" + _HINT
 
     @property

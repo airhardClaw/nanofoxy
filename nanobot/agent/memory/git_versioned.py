@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,7 +22,7 @@ class GitMemoryStore:
     def _init_or_load_repo(self) -> None:
         """Initialize git repo or load existing one."""
         try:
-            from git import Repo, Actor
+            from git import Actor, Repo
 
             if not self.git_dir.exists():
                 self.repo = Repo.init(self.memory_dir)

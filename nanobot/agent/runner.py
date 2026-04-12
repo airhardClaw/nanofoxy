@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import Any
+
+from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.tools.registry import ToolRegistry
@@ -64,8 +67,12 @@ class AgentRunner:
         error: str | None = None
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
+        total_llm_time = 0.0
+        total_tool_time = 0.0
+        iterations_count = 0
 
         for iteration in range(spec.max_iterations):
+            iterations_count = iteration + 1
             context = AgentHookContext(iteration=iteration, messages=messages)
             await hook.before_iteration(context)
             kwargs: dict[str, Any] = {
@@ -80,6 +87,7 @@ class AgentRunner:
             if spec.reasoning_effort is not None:
                 kwargs["reasoning_effort"] = spec.reasoning_effort
 
+            llm_start = time.perf_counter()
             if hook.wants_streaming():
                 async def _stream(delta: str) -> None:
                     await hook.on_stream(context, delta)
@@ -90,6 +98,8 @@ class AgentRunner:
                 )
             else:
                 response = await self.provider.chat_with_retry(**kwargs)
+            llm_time = time.perf_counter() - llm_start
+            total_llm_time += llm_time
 
             from nanobot.utils.helpers import is_context_window_error
             if is_context_window_error(response.content):
@@ -131,7 +141,10 @@ class AgentRunner:
 
                 await hook.before_execute_tools(context)
 
+                tool_start = time.perf_counter()
                 results, new_events, fatal_error = await self._execute_tools(spec, response.tool_calls)
+                tool_time = time.perf_counter() - tool_start
+                total_tool_time += tool_time
                 tool_events.extend(new_events)
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
@@ -180,6 +193,14 @@ class AgentRunner:
             stop_reason = "max_iterations"
             template = spec.max_iterations_message or _DEFAULT_MAX_ITERATIONS_MESSAGE
             final_content = template.format(max_iterations=spec.max_iterations)
+
+        logger.info(
+            "Agent run completed: iterations={}, llm_time={:.3f}s, tool_time={:.3f}s, "
+            "prompt_tokens={}, completion_tokens={}, stop_reason={}",
+            iterations_count, total_llm_time, total_tool_time,
+            usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0),
+            stop_reason,
+        )
 
         return AgentRunResult(
             final_content=final_content,

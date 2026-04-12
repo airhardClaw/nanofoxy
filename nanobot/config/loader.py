@@ -8,6 +8,7 @@ from typing import Any
 
 import pydantic
 from loguru import logger
+
 from nanobot.config.schema import Config
 
 # Global variable to store current config path (for multi-instance support)

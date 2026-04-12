@@ -3,8 +3,8 @@
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.tools.base import Tool
 from nanobot.agent.memory import MemoryStore, QMDEngine
+from nanobot.agent.tools.base import Tool
 
 if TYPE_CHECKING:
     from nanobot.agent.memory.consolidator import MemoryConsolidator
@@ -89,10 +89,10 @@ class MemoryTool(Tool):
             if action == "search":
                 if not query:
                     return "Error: query is required for search action"
-                
+
                 entry_id = f"search_{hash(query) % 100000}"
                 self._track_recall(entry_id, query)
-                
+
                 if self._qmd_engine:
                     results = await store.search_with_qmd(
                         query,
@@ -114,9 +114,9 @@ class MemoryTool(Tool):
             elif action == "history":
                 if not query:
                     return "Error: query is required for history action"
-                
+
                 self._track_recall(f"history_{hash(query) % 100000}", query)
-                
+
                 if self._qmd_engine:
                     results = await store.search_with_qmd(
                         query,
@@ -159,9 +159,9 @@ class MemoryTool(Tool):
         for r in results:
             content = r.get("content") or r.get("snippet", "")
             lines.append(content)
-            
+
             if self._citations in ("auto", "on"):
                 if citation := r.get("source"):
                     lines.append(f"_{citation}_")
-        
+
         return "\n\n".join(lines)

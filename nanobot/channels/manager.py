@@ -6,6 +6,7 @@ import asyncio
 from typing import Any
 
 from loguru import logger
+
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel

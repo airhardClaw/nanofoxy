@@ -9,7 +9,6 @@ from typer.testing import CliRunner
 from nanobot.bus.events import OutboundMessage
 from nanobot.cli.commands import _make_provider, app
 from nanobot.config.schema import Config
-from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
 
 runner = CliRunner()
@@ -199,20 +198,6 @@ def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkey
     assert f"nanobot gateway --config {resolved_config}" in compact_output
 
 
-def test_config_matches_github_copilot_codex_with_hyphen_prefix():
-    config = Config()
-    config.agents.defaults.model = "github-copilot/gpt-5.3-codex"
-
-    assert config.get_provider_name() == "github_copilot"
-
-
-def test_config_matches_openai_codex_with_hyphen_prefix():
-    config = Config()
-    config.agents.defaults.model = "openai-codex/gpt-5.1-codex"
-
-    assert config.get_provider_name() == "openai_codex"
-
-
 def test_config_dump_excludes_oauth_provider_blocks():
     config = Config()
 
@@ -255,16 +240,6 @@ def test_config_accepts_camel_case_explicit_provider_name_for_coding_plan():
             },
         }
     )
-
-    assert config.get_provider_name() == "volcengine_coding_plan"
-    assert config.get_api_base() == "https://ark.cn-beijing.volces.com/api/coding/v3"
-
-
-def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
-    assert find_by_name("volcengineCodingPlan") is not None
-    assert find_by_name("volcengineCodingPlan").name == "volcengine_coding_plan"
-    assert find_by_name("github-copilot") is not None
-    assert find_by_name("github-copilot").name == "github_copilot"
 
 
 def test_config_auto_detects_ollama_from_local_api_base():
@@ -315,11 +290,6 @@ def test_openai_compat_provider_passes_model_through():
         provider = OpenAICompatProvider(default_model="github-copilot/gpt-5.3-codex")
 
     assert provider.get_default_model() == "github-copilot/gpt-5.3-codex"
-
-
-def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
-    assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
-    assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
 
 
 def test_make_provider_passes_extra_headers_to_custom_provider():

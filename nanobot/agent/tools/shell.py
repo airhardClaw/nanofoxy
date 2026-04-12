@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from nanobot.agent.tools.base import Tool
 
+from nanobot.agent.tools.base import Tool
 
 # Sensitive environment variables to filter out (prevent leaking to exec)
 _SENSITIVE_ENV_VARS = {
@@ -34,7 +34,7 @@ def _is_sensitive_var(name: str) -> bool:
 
 def _get_clean_env(path_append: str = "") -> dict[str, str]:
     """Get a clean environment for exec, filtering sensitive vars.
-    
+
     This prevents leaking API keys and secrets to the exec tool.
     """
     clean_env = {
@@ -47,15 +47,15 @@ def _get_clean_env(path_append: str = "") -> dict[str, str]:
         "TMPDIR": os.environ.get("TMPDIR", "/tmp"),
         "TERM": os.environ.get("TERM", "xterm-256color"),
     }
-    
+
     # Copy only non-sensitive environment variables
     for key, value in os.environ.items():
         if not _is_sensitive_var(key):
             clean_env[key] = value
-    
+
     if path_append:
         clean_env["PATH"] = clean_env["PATH"] + os.pathsep + path_append
-    
+
     return clean_env
 
 

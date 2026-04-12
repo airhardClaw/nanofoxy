@@ -10,12 +10,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
+
 from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain
 
 if TYPE_CHECKING:
+    from nanobot.agent.memory.qmd_engine import QMDEngine
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session, SessionManager
-    from nanobot.agent.memory.qmd_engine import QMDEngine
 
 
 _SAVE_MEMORY_TOOL = [
@@ -50,7 +51,7 @@ _MEMORY_TEMPLATE = """## Facts (Beständige Fakten - NICHT löschen)
 
 ## Current Context (Wird bei jedem Merge aktualisiert)
 - **Last Updated**: {timestamp}
-- **Active Projects**: 
+- **Active Projects**:
 - **Current Tasks**: """
 
 
@@ -102,10 +103,10 @@ class MemoryStore:
         """Create a timestamped backup of MEMORY.md before writing."""
         if not self.memory_file.exists():
             return None
-        
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_file = self.memory_dir / f"MEMORY.md.bak.{timestamp}"
-        
+
         try:
             self.memory_file.rename(backup_file)
             self._cleanup_old_backups()
@@ -130,23 +131,23 @@ class MemoryStore:
     def write_long_term(self, content: str) -> None:
         """Write long-term memory with automatic backup."""
         current = self.read_long_term()
-        
+
         if content != current:
             self._create_backup()
-        
+
         self.memory_file.write_text(content, encoding="utf-8")
 
     def update_memory_safely(self, new_memory: str) -> bool:
         """Update memory with backup and basic validation.
-        
+
         Returns True if update was applied, False if rejected.
         """
         current = self.read_long_term()
-        
+
         if not self._validate_memory_update(current, new_memory):
             logger.warning("Memory update validation failed - rejecting change")
             return False
-        
+
         self.write_long_term(new_memory)
         return True
 
@@ -154,37 +155,37 @@ class MemoryStore:
         """Validate that memory update doesn't lose important content."""
         if not old:
             return True
-        
+
         if new == old:
             return True
-        
+
         if len(new) < len(old) * 0.5:
             logger.warning(
                 "Memory update shrinks content significantly (old: {} chars, new: {} chars)",
                 len(old), len(new)
             )
             return False
-        
+
         return True
 
     def merge_memory_update(self, update: str) -> bool:
         """Merge new memory content with existing instead of full replacement.
-        
+
         Appends new content under a dated section.
         """
         current = self.read_long_term()
-        
+
         if update.strip() in (current or "").strip():
             logger.debug("Memory update identical to existing - skipping")
             return True
-        
+
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        
+
         if current:
             merged = f"{current.rstrip()}\n\n---\n\n### {timestamp}\n\n{update.strip()}"
         else:
             merged = update.strip()
-        
+
         return self.update_memory_safely(merged)
 
     def append_history(self, entry: str) -> None:
@@ -200,7 +201,7 @@ class MemoryStore:
         memory = self.read_long_term()
         if not memory:
             return "No long-term memory stored."
-        
+
         lines = memory.split("\n")
         facts = []
         for line in lines:
@@ -208,27 +209,27 @@ class MemoryStore:
                 facts.append(line.strip())
                 if len(facts) >= max_facts:
                     break
-        
+
         if not facts:
             return memory[:500] + "..." if len(memory) > 500 else memory
-        
+
         return "## Key Facts\n" + "\n".join(facts)
 
     def search_memory(self, query: str) -> list[str]:
         """Search memory and history for query string."""
         results = []
         query_lower = query.lower()
-        
+
         memory = self.read_long_term()
         if memory and query_lower in memory.lower():
             results.append(f"[MEMORY] {memory[:500]}")
-        
+
         if self.history_file.exists():
             history = self.history_file.read_text(encoding="utf-8")
             for line in history.split("\n"):
                 if query_lower in line.lower():
                     results.append(f"[HISTORY] {line[:200]}")
-        
+
         return results[:10]
 
     async def search_with_qmd(
@@ -240,7 +241,7 @@ class MemoryStore:
         """Search using QMD engine or fallback to builtin."""
         if qmd_engine and await qmd_engine.ensure_available():
             return await qmd_engine.search(query, limit=limit)
-        
+
         builtin_results = self.search_memory(query)
         return [
             {"collection": "builtin", "content": r, "source": "memory"}
@@ -522,7 +523,7 @@ class MemoryConsolidator:
         session: Session,
     ) -> bool:
         """Proactively consolidate messages BEFORE sending to LLM.
-        
+
         Called when context usage exceeds threshold to prevent context window errors.
         Returns True if consolidation was performed or not needed.
         """
@@ -533,14 +534,14 @@ class MemoryConsolidator:
         async with lock:
             budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
             threshold = int(budget * self.PRE_CONSOLIDATE_THRESHOLD)
-            
+
             estimated, source = self.estimate_session_prompt_tokens(session)
             if estimated <= 0:
                 return True
-            
+
             if estimated < threshold:
                 return True
-            
+
             logger.info(
                 "Pre-consolidation for {}: {}/{} (threshold {})",
                 session.key,
@@ -548,7 +549,7 @@ class MemoryConsolidator:
                 self.context_window_tokens,
                 threshold,
             )
-            
+
             target = int(budget * 0.5)
             for round_num in range(self._MAX_CONSOLIDATION_ROUNDS):
                 if estimated <= target:

@@ -1,6 +1,6 @@
 ---
 name: gnome-calendar
-description: Read, create, edit and delete calendar events from GNOME-connected Google calendars.
+description: Read, create, edit and delete calendar events from local ICS files.
 trigger_patterns:
   - "calendar"
   - "termine"
@@ -8,7 +8,7 @@ trigger_patterns:
   - "meeting"
   - "kalender"
   - "termin"
-metadata: {"nanobot":{"emoji":"📅","requires":{"bins":["python3"]}}}
+metadata: {"nanobot":{"emoji":"📅"}}
 ---
 
 # GNOME Calendar

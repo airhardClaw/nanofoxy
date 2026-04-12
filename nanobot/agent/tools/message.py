@@ -126,11 +126,11 @@ class MessageTool(Tool):
         """Delete a message in a Telegram chat. Requires chat_id and message_id."""
         if self._default_channel != "telegram" and not self._telegram_channel:
             return "Error: Telegram channel not available"
-        
+
         tg = self._telegram_channel
         if not tg:
             return "Error: Telegram channel not initialized"
-        
+
         try:
             success = await tg.telegram_delete_message(chat_id, message_id)
             if success:
@@ -143,16 +143,16 @@ class MessageTool(Tool):
         """Send a sticker to a Telegram chat. Requires chat_id and file_id (Telegram file ID or URL)."""
         if self._default_channel != "telegram" and not self._telegram_channel:
             return "Error: Telegram channel not available"
-        
+
         tg = self._telegram_channel
         if not tg:
             return "Error: Telegram channel not initialized"
-        
+
         try:
             success = await tg.telegram_send_sticker(chat_id, file_id)
             if success:
                 return f"Sticker sent to chat {chat_id}"
-            return f"Failed to send sticker"
+            return "Failed to send sticker"
         except Exception as e:
             return f"Error sending sticker: {str(e)}"
 
@@ -169,16 +169,16 @@ class MessageTool(Tool):
         """Send a poll to a Telegram chat. Requires chat_id, question, and options list."""
         if self._default_channel != "telegram" and not self._telegram_channel:
             return "Error: Telegram channel not available"
-        
+
         tg = self._telegram_channel
         if not tg:
             return "Error: Telegram channel not initialized"
-        
+
         if len(options) < 2:
             return "Error: Poll requires at least 2 options"
         if len(options) > 10:
             return "Error: Poll cannot have more than 10 options"
-        
+
         try:
             success = await tg.telegram_send_poll(
                 chat_id, question, options,
@@ -188,6 +188,6 @@ class MessageTool(Tool):
             )
             if success:
                 return f"Poll sent to chat {chat_id}: {question}"
-            return f"Failed to send poll"
+            return "Failed to send poll"
         except Exception as e:
             return f"Error sending poll: {str(e)}"

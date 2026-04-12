@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import shutil
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -30,15 +28,15 @@ class QMDEngine:
         self.workspace = workspace
         self.agent_id = agent_id
         self.config = config or {}
-        
+
         self.qmd_home = ensure_dir(Path.home() / ".nanofoxy" / "agents" / agent_id / "qmd")
         self.collections_dir = ensure_dir(self.qmd_home / "collections")
-        
+
         self.paths = self.config.get("paths", [])
         self.sessions_enabled = self.config.get("sessions", {}).get("enabled", True)
         self.update_interval = self.config.get("updateIntervalSeconds", 300)
         self.timeout_ms = self.config.get("limits", {}).get("timeoutMs", 4000)
-        
+
         self._qmd_available: bool | None = None
         self._update_task: asyncio.Task | None = None
 
@@ -66,12 +64,12 @@ class QMDEngine:
         try:
             await self._create_collections()
             await self._index_workspace()
-            
+
             for path_config in self.paths:
                 await self._index_extra_path(path_config)
-            
+
             self._start_periodic_updates()
-            
+
             logger.info("QMD initialized at {}", self.qmd_home)
             return True
         except Exception:
@@ -93,7 +91,7 @@ class QMDEngine:
         files = []
         for ext in ("*.md", "*.txt"):
             files.extend(memory_dir.glob(ext))
-        
+
         for file in files:
             await self._add_to_collection(self.DEFAULT_COLLECTION, file)
 
@@ -108,7 +106,7 @@ class QMDEngine:
             return
 
         collection_path = ensure_dir(self.collections_dir / name)
-        
+
         for file in path.glob(pattern):
             if file.is_file():
                 dest = collection_path / file.relative_to(path)
@@ -124,13 +122,13 @@ class QMDEngine:
             return
 
         sessions_dir = ensure_dir(self.collections_dir / self.SESSIONS_COLLECTION)
-        
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         session_file = sessions_dir / f"session_{timestamp}.md"
-        
+
         content = self._format_messages_for_indexing(messages)
         session_file.write_text(content, encoding="utf-8")
-        
+
         await self._run_qmd("update", self.SESSIONS_COLLECTION)
 
     def _format_messages_for_indexing(self, messages: list[dict[str, Any]]) -> str:
@@ -141,10 +139,10 @@ class QMDEngine:
             content = msg.get("content", "")
             if not content:
                 continue
-            
+
             ts = msg.get("timestamp", "?")[:16]
             lines.append(f"[{ts}] {role.upper()}: {content}")
-        
+
         return "\n\n".join(lines)
 
     async def search(
@@ -155,14 +153,14 @@ class QMDEngine:
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         """Search using QMD with specified mode.
-        
+
         Modes: search (BM25), vsearch (vector), query (BM25 + reranking)
         """
         if not await self.ensure_available():
             return []
 
         coll = collection or self.DEFAULT_COLLECTION
-        
+
         try:
             result = await self._run_qmd(
                 mode,
@@ -171,7 +169,7 @@ class QMDEngine:
                 "--limit", str(limit),
                 "--timeout", str(self.timeout_ms),
             )
-            
+
             return self._parse_search_results(result, coll)
         except Exception:
             logger.exception("QMD search failed for query: {}", query)
@@ -181,12 +179,12 @@ class QMDEngine:
         """Parse QMD search output into structured results."""
         results = []
         lines = output.strip().split("\n")
-        
+
         for line in lines:
             line = line.strip()
             if not line:
                 continue
-            
+
             if line.startswith("qmd/"):
                 parts = line.split(":", 1)
                 if len(parts) >= 2:
@@ -203,13 +201,13 @@ class QMDEngine:
                     "collection": collection,
                     "content": line,
                 })
-        
+
         return results
 
     async def _run_qmd(self, *args: str) -> str:
         """Run qmd command and return output."""
         cmd = ["qmd", *args]
-        
+
         try:
             result = await asyncio.wait_for(
                 asyncio.create_subprocess_exec(
@@ -221,11 +219,11 @@ class QMDEngine:
                 timeout=self.timeout_ms / 1000,
             )
             stdout, stderr = await result.communicate()
-            
+
             if result.returncode != 0:
                 logger.warning("QMD command failed: {} -> {}", cmd, stderr.decode())
                 return ""
-            
+
             return stdout.decode("utf-8")
         except asyncio.TimeoutError:
             logger.warning("QMD command timed out: {}", cmd)

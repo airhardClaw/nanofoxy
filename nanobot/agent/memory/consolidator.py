@@ -10,10 +10,9 @@ from typing import TYPE_CHECKING, Any, Callable
 from loguru import logger
 
 if TYPE_CHECKING:
+    from nanobot.agent.memory.qmd_engine import QMDEngine
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session, SessionManager
-    from nanobot.agent.memory.store import MemoryStore
-    from nanobot.agent.memory.qmd_engine import QMDEngine
 
 from nanobot.utils.helpers import estimate_message_tokens, estimate_prompt_tokens_chain
 
@@ -37,7 +36,7 @@ class MemoryConsolidator:
         qmd_engine: QMDEngine | None = None,
         dreaming_config: dict[str, Any] | None = None,
     ):
-        from nanobot.agent.memory import MemoryStore, DreamingService
+        from nanobot.agent.memory import DreamingService, MemoryStore
 
         self.store = MemoryStore(workspace)
         self.qmd_engine = qmd_engine
@@ -83,20 +82,20 @@ class MemoryConsolidator:
     async def consolidate_messages(self, messages: list[dict[str, object]]) -> bool:
         """Archive a selected message chunk into persistent memory."""
         success = await self.store.consolidate(messages, self.provider, self.model)
-        
+
         if success and self.qmd_engine:
             await self._index_to_qmd(messages)
-        
+
         if success and self._version_manager:
             self._version_manager.auto_save()
-        
+
         return success
 
     async def _index_to_qmd(self, messages: list[dict[str, object]]) -> None:
         """Index consolidated messages to QMD if session indexing is enabled."""
         if not self.qmd_engine or not self.qmd_engine.sessions_enabled:
             return
-        
+
         try:
             await self.qmd_engine.index_messages(messages)
         except Exception:
@@ -219,7 +218,7 @@ class MemoryConsolidator:
         session: Session,
     ) -> bool:
         """Proactively consolidate messages BEFORE sending to LLM.
-        
+
         Called when context usage exceeds threshold to prevent context window errors.
         Returns True if consolidation was performed or not needed.
         """
@@ -230,14 +229,14 @@ class MemoryConsolidator:
         async with lock:
             budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
             threshold = int(budget * self.PRE_CONSOLIDATE_THRESHOLD)
-            
+
             estimated, source = self.estimate_session_prompt_tokens(session)
             if estimated <= 0:
                 return True
-            
+
             if estimated < threshold:
                 return True
-            
+
             logger.info(
                 "Pre-consolidation for {}: {}/{} (threshold {})",
                 session.key,
@@ -245,7 +244,7 @@ class MemoryConsolidator:
                 self.context_window_tokens,
                 threshold,
             )
-            
+
             target = int(budget * 0.5)
             for round_num in range(self._MAX_CONSOLIDATION_ROUNDS):
                 if estimated <= target:
@@ -286,7 +285,7 @@ class MemoryConsolidator:
     async def run_dreaming(self, phase: str | None = None) -> dict[str, int]:
         """Run dreaming phases. If phase is specified, run only that phase."""
         if not self.dreaming:
-            return {"light": 0, "deep": 0, "rem": 0}
+            return {"light": 0, "deep": 0, "rem": 0, "code_review": 0}
 
         results = {}
         if phase is None or phase == "light":
@@ -295,6 +294,11 @@ class MemoryConsolidator:
             results["deep"] = await self.dreaming.run_deep_phase()
         if phase is None or phase == "rem":
             results["rem"] = await self.dreaming.run_rem_phase()
+
+        if phase is None and self.dreaming.config.get("auto_code_review", True):
+            logger.info("Running automatic code review after dreaming phases...")
+            code_review_results = await self.dreaming.run_code_review()
+            results["code_review"] = code_review_results
 
         return results
 

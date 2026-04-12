@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
-from loguru import logger
+
 if TYPE_CHECKING:
     from nanobot.bus.events import InboundMessage, OutboundMessage
     from nanobot.session.manager import Session

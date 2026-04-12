@@ -1,7 +1,6 @@
 """OpenAI-compatible API server for nanobot gateway."""
 
 import os
-from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -47,7 +46,7 @@ async def chat_completions(request: Request):
     """
     body = await request.json()
     model = body.get("model", "nanobot-default")
-    messages = body.get("messages", [])
+    body.get("messages", [])
 
     # Simple passthrough - in production, this would connect to the gateway
     return JSONResponse({

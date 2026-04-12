@@ -1,9 +1,8 @@
 """GNOME Calendar tool for reading and managing calendar events."""
 
-import os
 import re
 import sqlite3
-from datetime import datetime, date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -107,15 +106,15 @@ class GNOMECalendarTool(Tool):
             db_path = self._cache_dir / calendar_id / "cache.db"
             if not db_path.exists():
                 return calendar_id
-            
+
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
-            
+
             # Try to get any event to extract calendar name
             cursor.execute("SELECT ECacheOBJ FROM ECacheObjects LIMIT 1")
             row = cursor.fetchone()
             conn.close()
-            
+
             if row:
                 ics_data = row[0]
                 if "X-WR-CALNAME" in ics_data:
@@ -145,32 +144,32 @@ class GNOMECalendarTool(Tool):
         """Parse DTSTART and DTEND from ICS data."""
         dtstart = None
         dtend = None
-        
+
         # Handle DATE (all-day events): DTSTART;VALUE=DATE:20260501
         match = re.search(rf"{field};VALUE=DATE:(\d{{8}})", ics_data)
         if match:
             dt_val = match.group(1)
             dtstart = datetime.strptime(dt_val, "%Y%m%d").date()
-            
+
             # Try DTEND
             end_match = re.search(r"DTEND;VALUE=DATE:(\d{8})", ics_data)
             if end_match:
                 dtend = datetime.strptime(end_match.group(1), "%Y%m%d").date()
             return dtstart, dtend
-        
+
         # Handle datetime with TZID: DTSTART;TZID=Europe/Vienna:20260406T143000
         match = re.search(rf"{field};TZID=[^:]+:(\d{{4}})(\d{{2}})(\d{{2}}T\d{{2}})\d{{2}}", ics_data)
         if match:
             dt_val = f"{match.group(1)}-{match.group(2)}-{match.group(3)}".replace("T", " ")
             dtstart = datetime.strptime(dt_val, "%Y-%m-%d %H%M")
-        
+
         # Handle datetime without TZ (UTC): DTSTART:20260406T143000Z
         if not dtstart:
             match = re.search(rf"{field}:(\d{{4}})(\d{{2}})(\d{{2}}T\d{{2}})\d{{2}}([Z+-])?", ics_data)
             if match:
                 dt_val = f"{match.group(1)}-{match.group(2)}-{match.group(3)}".replace("T", " ")
                 dtstart = datetime.strptime(dt_val, "%Y-%m-%d %H%M")
-        
+
         # Parse DTEND similarly
         end_match = re.search(r"DTEND;TZID=[^:]+:(\d{4})(\d{2})(\d{2}T\d{2})\d{2}", ics_data)
         if end_match:
@@ -181,7 +180,7 @@ class GNOMECalendarTool(Tool):
             if end_match:
                 dt_val = f"{end_match.group(1)}-{end_match.group(2)}-{end_match.group(3)}".replace("T", " ")
                 dtend = datetime.strptime(dt_val, "%Y-%m-%d %H%M")
-        
+
         return dtstart, dtend
 
     def _list_events(self, calendar_id: str | None, date_str: str | None) -> str:
@@ -198,25 +197,25 @@ class GNOMECalendarTool(Tool):
         calendar_dirs = [self._cache_dir / calendar_id] if calendar_id else [
             d for d in self._cache_dir.iterdir() if d.is_dir() and d.name != "trash"
         ]
-        
+
         events = []
         for cal_dir in calendar_dirs:
             db_path = cal_dir / "cache.db"
             if not db_path.exists():
                 continue
-                
+
             try:
                 conn = sqlite3.connect(db_path)
                 cursor = conn.cursor()
                 cursor.execute("SELECT ECacheUID, summary, ECacheOBJ FROM ECacheObjects")
-                
+
                 for row in cursor.fetchall():
                     uid, summary, ics_data = row
                     if not ics_data:
                         continue
-                    
+
                     dtstart, dtend = self._parse_ics_datetime(ics_data, "DTSTART")
-                    
+
                     if target_date:
                         if isinstance(dtstart, datetime):
                             event_date = dtstart.date()
@@ -230,14 +229,14 @@ class GNOMECalendarTool(Tool):
                     summary = summary or "Untitled"
                     loc_match = re.search(r"LOCATION:(.+?)(?:\r?\n|\Z)", ics_data)
                     location = loc_match.group(1).strip() if loc_match else ""
-                    
+
                     start_str = ""
                     if dtstart:
                         if isinstance(dtstart, datetime):
                             start_str = dtstart.strftime("%H:%M")
                         elif isinstance(dtstart, date):
                             start_str = str(dtstart)
-                    
+
                     end_str = ""
                     if dtend:
                         if isinstance(dtend, datetime):
@@ -251,7 +250,7 @@ class GNOMECalendarTool(Tool):
                         line += f" @ {location}"
                     line += f" [uid: {uid}]"
                     events.append(line)
-                    
+
                 conn.close()
             except Exception as e:
                 events.append(f"- Error reading {cal_dir.name}: {e}")
@@ -304,9 +303,9 @@ class GNOMECalendarTool(Tool):
         target_dir = self._cache_dir / (calendar_id or "new_calendar")
         target_dir.mkdir(parents=True, exist_ok=True)
         target_file = target_dir / "cache.db"
-        
+
         ics_content = event.to_ical().decode()
-        
+
         if target_file.exists():
             conn = sqlite3.connect(target_file)
             cursor = conn.cursor()
@@ -394,20 +393,20 @@ class GNOMECalendarTool(Tool):
         try:
             conn = sqlite3.connect(target_file)
             cursor = conn.cursor()
-            
+
             # Get existing event
             cursor.execute("SELECT ECacheOBJ, summary FROM ECacheObjects WHERE ECacheUID = ?", (uid,))
             row = cursor.fetchone()
             if not row:
                 conn.close()
                 return f"Event with uid {uid} not found"
-            
+
             ics_data, old_summary = row
-            
+
             # Build updated ICS
             import icalendar
             event = icalendar.Event.from_ical(ics_data)
-            
+
             if title:
                 event.add("summary", title)
             if start:
@@ -418,10 +417,10 @@ class GNOMECalendarTool(Tool):
                 event.add("description", description)
             if location:
                 event.add("location", location)
-            
+
             new_ics = event.to_ical().decode()
             new_summary = title or old_summary
-            
+
             cursor.execute(
                 "UPDATE ECacheObjects SET ECacheOBJ = ?, summary = ? WHERE ECacheUID = ?",
                 (new_ics, new_summary, uid)
@@ -446,12 +445,12 @@ class GNOMECalendarTool(Tool):
         try:
             conn = sqlite3.connect(target_file)
             cursor = conn.cursor()
-            
+
             cursor.execute("DELETE FROM ECacheObjects WHERE ECacheUID = ?", (uid,))
             if cursor.rowcount == 0:
                 conn.close()
                 return f"Event with uid {uid} not found"
-            
+
             conn.commit()
             conn.close()
             return f"Deleted event {uid}"

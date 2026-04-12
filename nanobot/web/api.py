@@ -1,13 +1,10 @@
 """FastAPI web server for nanobot dashboard."""
 
-import asyncio
 import time
-from datetime import datetime
-from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, WebSocket
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 
@@ -59,7 +56,7 @@ def create_app(
     app.state.start_time = start_time or time.time()
     app.state.websockets: list[WebSocket] = []
 
-    from nanobot.web.routes import router, register_paperclip_routes
+    from nanobot.web.routes import register_paperclip_routes, router
     app.include_router(router)
     register_paperclip_routes(app)
 
@@ -195,7 +192,7 @@ _DASHBOARD_HTML = r"""
             <h1>NanoFoxy Dashboard</h1>
             <span class="status-badge">Online</span>
         </header>
-        
+
         <nav class="nav">
             <a href="#" class="active" data-page="dashboard">Dashboard</a>
             <a href="#" data-page="subagents">Subagents</a>
@@ -203,45 +200,45 @@ _DASHBOARD_HTML = r"""
             <a href="#" data-page="sessions">Sessions</a>
             <a href="#" data-page="settings">Settings</a>
         </nav>
-        
+
         <div id="content">
             <div class="loading">Loading...</div>
         </div>
     </div>
-    
+
     <script>
         const API_BASE = '/api';
-        
+
         async function fetchStatus() {
             const res = await fetch(`${API_BASE}/status`);
             return res.json();
         }
-        
+
         async function fetchSessions() {
             const res = await fetch(`${API_BASE}/sessions`);
             return res.json();
         }
-        
+
         async function fetchConfig() {
             const res = await fetch(`${API_BASE}/config`);
             return res.json();
         }
-        
+
         async function fetchSubagents() {
             const res = await fetch(`${API_BASE}/subagents`);
             return res.json();
         }
-        
+
         async function fetchFiles(path = '') {
             const res = await fetch(`${API_BASE}/files?path=${encodeURIComponent(path)}`);
             return res.json();
         }
-        
+
         async function fetchFile(path) {
             const res = await fetch(`${API_BASE}/files/${encodeURIComponent(path)}`);
             return res.json();
         }
-        
+
         async function saveFile(path, content) {
             const res = await fetch(`${API_BASE}/files/${encodeURIComponent(path)}`, {
                 method: 'PUT',
@@ -249,7 +246,7 @@ _DASHBOARD_HTML = r"""
             });
             return res.json();
         }
-        
+
         function formatUptime(seconds) {
             const h = Math.floor(seconds / 3600);
             const m = Math.floor((seconds % 3600) / 60);
@@ -258,13 +255,13 @@ _DASHBOARD_HTML = r"""
             if (m > 0) return `${m}m ${s}s`;
             return `${s}s`;
         }
-        
+
         function formatDate(isoString) {
             if (!isoString) return 'N/A';
             const d = new Date(isoString);
             return d.toLocaleString();
         }
-        
+
         function renderDashboard(status, sessions) {
             return `
                 <div class="grid">
@@ -283,24 +280,24 @@ _DASHBOARD_HTML = r"""
                             <div class="stat-value">${formatUptime(status.uptime_seconds)}</div>
                         </div>
                     </div>
-                    
+
                     <div class="card">
                         <h2>Workspace</h2>
                         <div class="stat">
                             <div class="stat-value" style="font-size: 0.9rem; word-break: break-all;">${status.workspace || 'N/A'}</div>
                         </div>
                     </div>
-                    
+
                     <div class="card">
                         <h2>Channels</h2>
                         <div class="channel-list">
-                            ${status.channels_enabled.length > 0 
+                            ${status.channels_enabled.length > 0
                                 ? status.channels_enabled.map(c => `<span class="channel-tag">${c}</span>`).join('')
                                 : '<span class="stat-label">No channels enabled</span>'
                             }
                         </div>
                     </div>
-                    
+
                     <div class="card">
                         <h2>Cron Jobs</h2>
                         <div class="stat">
@@ -309,11 +306,11 @@ _DASHBOARD_HTML = r"""
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="card" style="margin-top: 20px;">
                     <h2>Recent Sessions</h2>
                     <div class="sessions-list">
-                        ${sessions.length > 0 
+                        ${sessions.length > 0
                             ? sessions.slice(0, 10).map(s => `
                                 <div class="session-item" data-key="${s.key}">
                                     <div class="session-key">${s.key}</div>
@@ -326,7 +323,7 @@ _DASHBOARD_HTML = r"""
                 </div>
             `;
         }
-        
+
         function renderSessions(sessions) {
             if (sessions.length === 0) {
                 return `
@@ -351,7 +348,7 @@ _DASHBOARD_HTML = r"""
                 </div>
             `;
         }
-        
+
         function renderSettings(config) {
             const channelsHtml = config.channels && Object.keys(config.channels).length > 0
                 ? Object.entries(config.channels).map(([name, settings]) => {
@@ -376,11 +373,11 @@ _DASHBOARD_HTML = r"""
                     `;
                 }).join('')
                 : '<div class="stat-label">No channels configured</div>';
-            
+
             return `
                 <div class="card">
                     <h2>Agent Configuration</h2>
-                    
+
                     <div style="margin-top: 20px;">
                         <h3 style="color: #94a3b8; font-size: 0.875rem; margin-bottom: 12px;">MODEL</h3>
                         <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #334155;">
@@ -396,14 +393,14 @@ _DASHBOARD_HTML = r"""
                             <span style="color: #f1f5f9;">${config.timezone || 'UTC'}</span>
                         </div>
                     </div>
-                    
+
                     <div style="margin-top: 24px;">
                         <h3 style="color: #94a3b8; font-size: 0.875rem; margin-bottom: 12px;">WORKSPACE</h3>
                         <div style="padding: 12px; background: #0f172a; border-radius: 8px; word-break: break-all; color: #f1f5f9; font-size: 0.875rem;">
                             ${config.workspace || 'N/A'}
                         </div>
                     </div>
-                    
+
                     <div style="margin-top: 24px;">
                         <h3 style="color: #94a3b8; font-size: 0.875rem; margin-bottom: 12px;">CHANNELS</h3>
                         <div style="background: #0f172a; border-radius: 8px; padding: 0 12px;">
@@ -413,14 +410,14 @@ _DASHBOARD_HTML = r"""
                 </div>
             `;
         }
-        
+
         async function loadPage(page) {
             const content = document.getElementById('content');
             const navLinks = document.querySelectorAll('.nav a');
-            
+
             navLinks.forEach(a => a.classList.remove('active'));
             document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
-            
+
             try {
                 if (page === 'dashboard') {
                     const [status, sessions] = await Promise.all([
@@ -428,7 +425,7 @@ _DASHBOARD_HTML = r"""
                         fetchSessions()
                     ]);
                     content.innerHTML = renderDashboard(status, sessions);
-                    
+
                     document.querySelectorAll('.session-item').forEach(item => {
                         item.addEventListener('click', () => {
                             loadSession(item.dataset.key);
@@ -437,7 +434,7 @@ _DASHBOARD_HTML = r"""
                 } else if (page === 'sessions') {
                     const sessions = await fetchSessions();
                     content.innerHTML = renderSessions(sessions);
-                    
+
                     document.querySelectorAll('.session-item').forEach(item => {
                         item.addEventListener('click', () => {
                             loadSession(item.dataset.key);
@@ -452,14 +449,14 @@ _DASHBOARD_HTML = r"""
                 } else if (page === 'files') {
                     const files = await fetchFiles('');
                     content.innerHTML = renderFiles(files, '');
-                    
+
                     // Add click handlers for file items
                     document.querySelectorAll('.session-item[data-path]').forEach(item => {
                         item.addEventListener('click', async () => {
                             const path = item.dataset.path;
                             const f = await fetchFile(path);
                             content.innerHTML = renderFiles(f, path);
-                            
+
                             // Add back button handler
                             document.querySelectorAll('.session-item[data-path]').forEach(backItem => {
                                 backItem.addEventListener('click', async () => {
@@ -480,7 +477,7 @@ _DASHBOARD_HTML = r"""
                 content.innerHTML = `<div class="error">Failed to load: ${e.message}</div>`;
             }
         }
-        
+
         function renderSubagents(subagents) {
             if (subagents.length === 0) {
                 return `
@@ -498,8 +495,8 @@ _DASHBOARD_HTML = r"""
                             <div class="session-item">
                                 <div class="session-key">${s.id}</div>
                                 <div class="session-time">
-                                    Role: ${s.role || 'N/A'} | 
-                                    Bot: @${s.bot_username || 'N/A'} | 
+                                    Role: ${s.role || 'N/A'} |
+                                    Bot: @${s.bot_username || 'N/A'} |
                                     Enabled: ${s.enabled ? 'Yes' : 'No'}
                                 </div>
                             </div>
@@ -508,21 +505,21 @@ _DASHBOARD_HTML = r"""
                 </div>
             `;
         }
-        
+
         function renderFiles(files, currentPath) {
             if (files.error) {
                 return `<div class="error">${files.error}</div>`;
             }
-            
+
             if (files.type === 'file') {
                 return renderFileEditor(files);
             }
-            
+
             // Directory view
             const items = files.items || [];
             const regularItems = items.filter(i => !i.hidden);
             const hiddenItems = items.filter(i => i.hidden);
-            
+
             return `
                 <div class="card">
                     <h2>Files: ${currentPath || '/'}</h2>
@@ -556,7 +553,7 @@ _DASHBOARD_HTML = r"""
                 </div>
             `;
         }
-        
+
         function renderFileEditor(file) {
             const escapedContent = file.content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
             return `
@@ -578,15 +575,15 @@ _DASHBOARD_HTML = r"""
                 </scr' + 'ipt>
             `;
         }
-        
+
         async function loadSession(key) {
             const content = document.getElementById('content');
             content.innerHTML = '<div class="loading">Loading session...</div>';
-            
+
             try {
                 const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(key)}`);
                 const session = await res.json();
-                
+
                 content.innerHTML = `
                     <div class="card">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -607,9 +604,9 @@ _DASHBOARD_HTML = r"""
                 content.innerHTML = `<div class="error">Failed to load session: ${e.message}</div>`;
             }
         }
-        
+
         window.loadPage = loadPage;
-        
+
         document.querySelectorAll('.nav a').forEach(link => {
             link.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -617,9 +614,9 @@ _DASHBOARD_HTML = r"""
                 if (page) loadPage(page);
             });
         });
-        
+
         loadPage('dashboard');
-        
+
         setInterval(async () => {
             try {
                 const status = await fetchStatus();

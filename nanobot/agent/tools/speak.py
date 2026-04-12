@@ -1,9 +1,7 @@
 """Speak tool for text-to-speech using LFM2.5-Audio."""
 
 import asyncio
-import os
 import tempfile
-from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -87,15 +85,15 @@ class SpeakTool:
                     if response.status != 200:
                         error_text = await response.text()
                         return f"TTS error ({response.status}): {error_text}"
-                    
+
                     audio_data = await response.read()
-                    
+
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                         f.write(audio_data)
                         audio_path = f.name
-                    
+
                     return f"Audio generated: {audio_path}. Use message tool with media=['{audio_path}'] to send to user."
-                    
+
         except asyncio.TimeoutError:
             return "Error: TTS request timed out"
         except aiohttp.ClientConnectorError:
