@@ -35,7 +35,7 @@ class QMDEngine:
         self.paths = self.config.get("paths", [])
         self.sessions_enabled = self.config.get("sessions", {}).get("enabled", True)
         self.update_interval = self.config.get("updateIntervalSeconds", 300)
-        self.timeout_ms = self.config.get("limits", {}).get("timeoutMs", 4000)
+        self.timeout_seconds = self.config.get("limits", {}).get("timeoutSeconds", 4)
 
         self._qmd_available: bool | None = None
         self._update_task: asyncio.Task | None = None
@@ -167,7 +167,7 @@ class QMDEngine:
                 coll,
                 "--query", query,
                 "--limit", str(limit),
-                "--timeout", str(self.timeout_ms),
+                "--timeout", str(self.timeout_seconds),
             )
 
             return self._parse_search_results(result, coll)
@@ -216,7 +216,7 @@ class QMDEngine:
                     stderr=asyncio.subprocess.PIPE,
                     cwd=str(self.qmd_home),
                 ),
-                timeout=self.timeout_ms / 1000,
+                timeout=self.timeout_seconds,
             )
             stdout, stderr = await result.communicate()
 

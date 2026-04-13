@@ -30,7 +30,7 @@ def test_add_job_accepts_valid_timezone(tmp_path) -> None:
     )
 
     assert job.schedule.tz == "America/Vancouver"
-    assert job.state.next_run_at_ms is not None
+    assert job.state.next_run_at_seconds is not None
 
 
 @pytest.mark.asyncio
@@ -39,7 +39,7 @@ async def test_execute_job_records_run_history(tmp_path) -> None:
     service = CronService(store_path, on_job=lambda _: asyncio.sleep(0))
     job = service.add_job(
         name="hist",
-        schedule=CronSchedule(kind="every", every_ms=60_000),
+        schedule=CronSchedule(kind="every", every_seconds=60),
         message="hello",
     )
     await service.run_job(job.id)
@@ -49,7 +49,7 @@ async def test_execute_job_records_run_history(tmp_path) -> None:
     assert len(loaded.state.run_history) == 1
     rec = loaded.state.run_history[0]
     assert rec.status == "ok"
-    assert rec.duration_ms >= 0
+    assert rec.duration_seconds >= 0
     assert rec.error is None
 
 
@@ -63,7 +63,7 @@ async def test_run_history_records_errors(tmp_path) -> None:
     service = CronService(store_path, on_job=fail)
     job = service.add_job(
         name="fail",
-        schedule=CronSchedule(kind="every", every_ms=60_000),
+        schedule=CronSchedule(kind="every", every_seconds=60),
         message="hello",
     )
     await service.run_job(job.id)
@@ -80,7 +80,7 @@ async def test_run_history_trimmed_to_max(tmp_path) -> None:
     service = CronService(store_path, on_job=lambda _: asyncio.sleep(0))
     job = service.add_job(
         name="trim",
-        schedule=CronSchedule(kind="every", every_ms=60_000),
+        schedule=CronSchedule(kind="every", every_seconds=60),
         message="hello",
     )
     for _ in range(25):
@@ -96,7 +96,7 @@ async def test_run_history_persisted_to_disk(tmp_path) -> None:
     service = CronService(store_path, on_job=lambda _: asyncio.sleep(0))
     job = service.add_job(
         name="persist",
-        schedule=CronSchedule(kind="every", every_ms=60_000),
+        schedule=CronSchedule(kind="every", every_seconds=60),
         message="hello",
     )
     await service.run_job(job.id)
@@ -105,8 +105,8 @@ async def test_run_history_persisted_to_disk(tmp_path) -> None:
     history = raw["jobs"][0]["state"]["runHistory"]
     assert len(history) == 1
     assert history[0]["status"] == "ok"
-    assert "runAtMs" in history[0]
-    assert "durationMs" in history[0]
+    assert "runAtSeconds" in history[0]
+    assert "durationSeconds" in history[0]
 
     fresh = CronService(store_path)
     loaded = fresh.get_job(job.id)
@@ -125,7 +125,7 @@ async def test_running_service_honors_external_disable(tmp_path) -> None:
     service = CronService(store_path, on_job=on_job)
     job = service.add_job(
         name="external-disable",
-        schedule=CronSchedule(kind="every", every_ms=200),
+        schedule=CronSchedule(kind="every", every_seconds=200),
         message="hello",
     )
     await service.start()

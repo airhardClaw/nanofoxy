@@ -1016,7 +1016,7 @@ async def test_telegram_config_default_values() -> None:
     
     # Error Policy
     assert config.error_policy == "reply"
-    assert config.error_cooldown_ms == 60000
+    assert config.error_cooldown_seconds == 60
     
     # Commands
     assert config.commands.native is True
@@ -1131,7 +1131,7 @@ async def test_error_cooldown() -> None:
         token="123:abc",
         allow_from=["*"],
         error_policy="reply",
-        error_cooldown_ms=1000,  # 1 second for testing
+        error_cooldown_seconds=1,  # 1 second for testing
     )
     channel = TelegramChannel(config, MessageBus())
     
@@ -1147,7 +1147,7 @@ async def test_error_cooldown() -> None:
     channel._last_error_time[chat_id] = now
     
     # Next error within cooldown should be blocked
-    assert time.time() - channel._last_error_time.get(chat_id, 0) < (config.error_cooldown_ms / 1000)
+    assert time.time() - channel._last_error_time.get(chat_id, 0) < config.error_cooldown_seconds
 
 
 @pytest.mark.asyncio

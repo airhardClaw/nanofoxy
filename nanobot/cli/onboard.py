@@ -212,7 +212,7 @@ def _get_field_display_name(field_key: str, field_info) -> str:
     name = field_key
     suffix_map = {
         "_s": " (seconds)",
-        "_ms": " (ms)",
+        "_seconds": " (seconds)",
         "_url": " URL",
         "_path": " Path",
         "_id": " ID",

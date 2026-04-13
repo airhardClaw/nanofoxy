@@ -20,33 +20,31 @@ from nanobot.cron.types import (
 )
 
 
-def _now_ms() -> int:
-    return int(time.time() * 1000)
+def _now_seconds() -> int:
+    return int(time.time())
 
 
-def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
-    """Compute next run time in ms."""
+def _compute_next_run(schedule: CronSchedule, now_seconds: int) -> int | None:
+    """Compute next run time in seconds."""
     if schedule.kind == "at":
-        return schedule.at_ms if schedule.at_ms and schedule.at_ms > now_ms else None
+        return schedule.at_seconds if schedule.at_seconds and schedule.at_seconds > now_seconds else None
 
     if schedule.kind == "every":
-        if not schedule.every_ms or schedule.every_ms <= 0:
+        if not schedule.every_seconds or schedule.every_seconds <= 0:
             return None
-        # Next interval from now
-        return now_ms + schedule.every_ms
+        return now_seconds + schedule.every_seconds
 
     if schedule.kind == "cron" and schedule.expr:
         try:
             from zoneinfo import ZoneInfo
 
             from croniter import croniter
-            # Use caller-provided reference time for deterministic scheduling
-            base_time = now_ms / 1000
+            base_time = now_seconds
             tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
             base_dt = datetime.fromtimestamp(base_time, tz=tz)
             cron = croniter(schedule.expr, base_dt)
             next_dt = cron.get_next(datetime)
-            return int(next_dt.timestamp() * 1000)
+            return int(next_dt.timestamp())
         except Exception:
             return None
 
@@ -112,8 +110,8 @@ class CronService:
                         enabled=j.get("enabled", True),
                         schedule=CronSchedule(
                             kind=schedule_data.get("kind", "once"),
-                            at_ms=schedule_data.get("atMs"),
-                            every_ms=schedule_data.get("everyMs"),
+                            at_seconds=schedule_data.get("atSeconds"),
+                            every_seconds=schedule_data.get("everySeconds"),
                             expr=schedule_data.get("expr"),
                             tz=schedule_data.get("tz"),
                         ),
@@ -125,22 +123,22 @@ class CronService:
                             to=j["payload"].get("to"),
                         ),
                         state=CronJobState(
-                            next_run_at_ms=j.get("state", {}).get("nextRunAtMs"),
-                            last_run_at_ms=j.get("state", {}).get("lastRunAtMs"),
+                            next_run_at_seconds=j.get("state", {}).get("nextRunAtSeconds"),
+                            last_run_at_seconds=j.get("state", {}).get("lastRunAtSeconds"),
                             last_status=j.get("state", {}).get("lastStatus"),
                             last_error=j.get("state", {}).get("lastError"),
                             run_history=[
                                 CronRunRecord(
-                                    run_at_ms=r["runAtMs"],
+                                    run_at_seconds=r["runAtSeconds"],
                                     status=r["status"],
-                                    duration_ms=r.get("durationMs", 0),
+                                    duration_seconds=r.get("durationSeconds", 0),
                                     error=r.get("error"),
                                 )
                                 for r in j.get("state", {}).get("runHistory", [])
                             ],
                         ),
-                        created_at_ms=j.get("createdAtMs", 0),
-                        updated_at_ms=j.get("updatedAtMs", 0),
+                        created_at_seconds=j.get("createdAtSeconds", 0),
+                        updated_at_seconds=j.get("updatedAtSeconds", 0),
                         delete_after_run=j.get("deleteAfterRun", False),
                     ))
                 self._store = CronStore(jobs=jobs)
@@ -168,8 +166,8 @@ class CronService:
                     "enabled": j.enabled,
                     "schedule": {
                         "kind": j.schedule.kind,
-                        "atMs": j.schedule.at_ms,
-                        "everyMs": j.schedule.every_ms,
+                        "atSeconds": j.schedule.at_seconds,
+                        "everySeconds": j.schedule.every_seconds,
                         "expr": j.schedule.expr,
                         "tz": j.schedule.tz,
                     },
@@ -181,22 +179,22 @@ class CronService:
                         "to": j.payload.to,
                     },
                     "state": {
-                        "nextRunAtMs": j.state.next_run_at_ms,
-                        "lastRunAtMs": j.state.last_run_at_ms,
+                        "nextRunAtSeconds": j.state.next_run_at_seconds,
+                        "lastRunAtSeconds": j.state.last_run_at_seconds,
                         "lastStatus": j.state.last_status,
                         "lastError": j.state.last_error,
                         "runHistory": [
                             {
-                                "runAtMs": r.run_at_ms,
+                                "runAtSeconds": r.run_at_seconds,
                                 "status": r.status,
-                                "durationMs": r.duration_ms,
+                                "durationSeconds": r.duration_seconds,
                                 "error": r.error,
                             }
                             for r in j.state.run_history
                         ],
                     },
-                    "createdAtMs": j.created_at_ms,
-                    "updatedAtMs": j.updated_at_ms,
+                    "createdAtSeconds": j.created_at_seconds,
+                    "updatedAtSeconds": j.updated_at_seconds,
                     "deleteAfterRun": j.delete_after_run,
                 }
                 for j in self._store.jobs
@@ -226,17 +224,17 @@ class CronService:
         """Recompute next run times for all enabled jobs."""
         if not self._store:
             return
-        now = _now_ms()
+        now = _now_seconds()
         for job in self._store.jobs:
             if job.enabled:
-                job.state.next_run_at_ms = _compute_next_run(job.schedule, now)
+                job.state.next_run_at_seconds = _compute_next_run(job.schedule, now)
 
-    def _get_next_wake_ms(self) -> int | None:
+    def _get_next_wake_seconds(self) -> int | None:
         """Get the earliest next run time across all jobs."""
         if not self._store:
             return None
-        times = [j.state.next_run_at_ms for j in self._store.jobs
-                 if j.enabled and j.state.next_run_at_ms]
+        times = [j.state.next_run_at_seconds for j in self._store.jobs
+                 if j.enabled and j.state.next_run_at_seconds]
         return min(times) if times else None
 
     def _arm_timer(self) -> None:
@@ -244,15 +242,14 @@ class CronService:
         if self._timer_task:
             self._timer_task.cancel()
 
-        next_wake = self._get_next_wake_ms()
+        next_wake = self._get_next_wake_seconds()
         if not next_wake or not self._running:
             return
 
-        delay_ms = max(0, next_wake - _now_ms())
-        delay_s = delay_ms / 1000
+        delay_seconds = max(0, next_wake - _now_seconds())
 
         async def tick():
-            await asyncio.sleep(delay_s)
+            await asyncio.sleep(delay_seconds)
             if self._running:
                 await self._on_timer()
 
@@ -264,10 +261,10 @@ class CronService:
         if not self._store:
             return
 
-        now = _now_ms()
+        now = _now_seconds()
         due_jobs = [
             j for j in self._store.jobs
-            if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
+            if j.enabled and j.state.next_run_at_seconds and now >= j.state.next_run_at_seconds
         ]
 
         for job in due_jobs:
@@ -278,7 +275,7 @@ class CronService:
 
     async def _execute_job(self, job: CronJob) -> None:
         """Execute a single job."""
-        start_ms = _now_ms()
+        start_seconds = _now_seconds()
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
 
         try:
@@ -294,14 +291,14 @@ class CronService:
             job.state.last_error = str(e)
             logger.error("Cron: job '{}' failed: {}", job.name, e)
 
-        end_ms = _now_ms()
-        job.state.last_run_at_ms = start_ms
-        job.updated_at_ms = end_ms
+        end_seconds = _now_seconds()
+        job.state.last_run_at_seconds = start_seconds
+        job.updated_at_seconds = end_seconds
 
         job.state.run_history.append(CronRunRecord(
-            run_at_ms=start_ms,
+            run_at_seconds=start_seconds,
             status=job.state.last_status,
-            duration_ms=end_ms - start_ms,
+            duration_seconds=end_seconds - start_seconds,
             error=job.state.last_error,
         ))
         job.state.run_history = job.state.run_history[-self._MAX_RUN_HISTORY:]
@@ -312,10 +309,10 @@ class CronService:
                 self._store.jobs = [j for j in self._store.jobs if j.id != job.id]
             else:
                 job.enabled = False
-                job.state.next_run_at_ms = None
+                job.state.next_run_at_seconds = None
         else:
             # Compute next run
-            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+            job.state.next_run_at_seconds = _compute_next_run(job.schedule, _now_seconds())
 
     # ========== Public API ==========
 
@@ -323,7 +320,7 @@ class CronService:
         """List all jobs."""
         store = self._load_store()
         jobs = store.jobs if include_disabled else [j for j in store.jobs if j.enabled]
-        return sorted(jobs, key=lambda j: j.state.next_run_at_ms or float('inf'))
+        return sorted(jobs, key=lambda j: j.state.next_run_at_seconds or float('inf'))
 
     def add_job(
         self,
@@ -338,7 +335,7 @@ class CronService:
         """Add a new job."""
         store = self._load_store()
         _validate_schedule_for_add(schedule)
-        now = _now_ms()
+        now = _now_seconds()
 
         job = CronJob(
             id=str(uuid.uuid4())[:8],
@@ -352,9 +349,9 @@ class CronService:
                 channel=channel,
                 to=to,
             ),
-            state=CronJobState(next_run_at_ms=_compute_next_run(schedule, now)),
-            created_at_ms=now,
-            updated_at_ms=now,
+            state=CronJobState(next_run_at_seconds=_compute_next_run(schedule, now)),
+            created_at_seconds=now,
+            updated_at_seconds=now,
             delete_after_run=delete_after_run,
         )
 
@@ -385,11 +382,11 @@ class CronService:
         for job in store.jobs:
             if job.id == job_id:
                 job.enabled = enabled
-                job.updated_at_ms = _now_ms()
+                job.updated_at_seconds = _now_seconds()
                 if enabled:
-                    job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+                    job.state.next_run_at_seconds = _compute_next_run(job.schedule, _now_seconds())
                 else:
-                    job.state.next_run_at_ms = None
+                    job.state.next_run_at_seconds = None
                 self._save_store()
                 self._arm_timer()
                 return job

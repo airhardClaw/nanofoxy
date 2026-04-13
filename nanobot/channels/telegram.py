@@ -205,8 +205,8 @@ class TelegramRetry(Base):
     """Telegram retry configuration for send helpers."""
 
     attempts: int = 3
-    min_delay_ms: int = 500
-    max_delay_ms: int = 5000
+    min_delay_seconds: float = 0.5
+    max_delay_seconds: float = 5.0
     jitter: bool = True
 
 
@@ -298,7 +298,7 @@ class TelegramConfig(Base):
 
     # Error Policy
     error_policy: Literal["reply", "silent"] = "reply"
-    error_cooldown_ms: int = 60000
+    error_cooldown_seconds: int = 60
 
     # Commands
     commands: TelegramCommands = Field(default_factory=TelegramCommands)
@@ -2123,7 +2123,7 @@ class TelegramChannel(BaseChannel):
 
         # Check cooldown
         last_error = self._last_error_time.get(chat_id, 0)
-        cooldown_seconds = self.config.error_cooldown_ms / 1000
+        cooldown_seconds = self.config.error_cooldown_seconds
         if time.time() - last_error < cooldown_seconds:
             return
 

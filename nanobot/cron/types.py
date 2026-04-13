@@ -8,10 +8,10 @@ from typing import Literal
 class CronSchedule:
     """Schedule definition for a cron job."""
     kind: Literal["at", "every", "cron"]
-    # For "at": timestamp in ms
-    at_ms: int | None = None
-    # For "every": interval in ms
-    every_ms: int | None = None
+    # For "at": timestamp in seconds
+    at_seconds: int | None = None
+    # For "every": interval in seconds
+    every_seconds: int | None = None
     # For "cron": cron expression (e.g. "0 9 * * *")
     expr: str | None = None
     # Timezone for cron expressions
@@ -32,17 +32,17 @@ class CronPayload:
 @dataclass
 class CronRunRecord:
     """A single execution record for a cron job."""
-    run_at_ms: int
+    run_at_seconds: int
     status: Literal["ok", "error", "skipped"]
-    duration_ms: int = 0
+    duration_seconds: int = 0
     error: str | None = None
 
 
 @dataclass
 class CronJobState:
     """Runtime state of a job."""
-    next_run_at_ms: int | None = None
-    last_run_at_ms: int | None = None
+    next_run_at_seconds: int | None = None
+    last_run_at_seconds: int | None = None
     last_status: Literal["ok", "error", "skipped"] | None = None
     last_error: str | None = None
     run_history: list[CronRunRecord] = field(default_factory=list)
@@ -57,8 +57,8 @@ class CronJob:
     schedule: CronSchedule = field(default_factory=lambda: CronSchedule(kind="every"))
     payload: CronPayload = field(default_factory=CronPayload)
     state: CronJobState = field(default_factory=CronJobState)
-    created_at_ms: int = 0
-    updated_at_ms: int = 0
+    created_at_seconds: int = 0
+    updated_at_seconds: int = 0
     delete_after_run: bool = False
 
 

@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -209,7 +209,12 @@ class QMDSearchScope(Base):
 class QMDLimitsConfig(Base):
     """Limits for QMD operations optimized for 8B models."""
 
-    timeout_ms: int = 2000  # Reduced for faster 8B models
+    timeout_seconds: int = 2  # Reduced for faster 8B models
+
+    def __getattr__(self, name: str):
+        if name == "timeout_ms":
+            return self.timeout_seconds * 1000
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
 
 class QMDConfig(Base):

@@ -27,7 +27,7 @@ class TestQMDConfigSchema:
         assert memory.backend == "builtin"
         assert memory.qmd.update_interval_seconds == 300
         assert memory.qmd.sessions.enabled is True
-        assert memory.qmd.limits.timeout_ms == 2000  # Optimized for 8B models
+        assert memory.qmd.limits.timeout_seconds == 2  # Optimized for 8B models
 
     def test_qmd_config_from_dict(self):
         """Test QMD config can be created from dict."""
@@ -38,7 +38,7 @@ class TestQMDConfigSchema:
                     {"name": "docs", "path": "~/notes", "pattern": "**/*.md"}
                 ],
                 "sessions": {"enabled": False},
-                "limits": {"timeoutMs": 8000},
+                "limits": {"timeoutSeconds": 8},
             },
         }
         # Need to wrap in the tools.m structure
@@ -48,7 +48,7 @@ class TestQMDConfigSchema:
         assert len(config.tools.memory.qmd.paths) == 1
         assert config.tools.memory.qmd.paths[0].name == "docs"
         assert config.tools.memory.qmd.sessions.enabled is False
-        assert config.tools.memory.qmd.limits.timeout_ms == 8000
+        assert config.tools.memory.qmd.limits.timeout_seconds == 8
 
     def test_qmd_citations_config(self):
         """Test citations configuration."""
@@ -198,10 +198,10 @@ class TestQMDEngine:
         """Test QMD timeout configuration."""
         from nanobot.agent.memory import QMDEngine
 
-        config = {"limits": {"timeoutMs": 8000}}
+        config = {"limits": {"timeoutSeconds": 8}}
         engine = QMDEngine(workspace=workspace, agent_id="test", config=config)
 
-        assert engine.timeout_ms == 8000
+        assert engine.timeout_seconds == 8
 
     def test_qmd_collections_dir(self, workspace):
         """Test QMD collections directory creation."""

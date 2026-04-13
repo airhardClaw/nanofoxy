@@ -256,11 +256,11 @@ class TestGetFieldDisplayName:
         # Contains "(Seconds)" with title case
         assert "(Seconds)" in name or "(seconds)" in name
 
-    def test_adds_ms_suffix(self):
+    def test_adds_seconds_suffix(self):
         field_info = SimpleNamespace(description=None)
-        name = _get_field_display_name("delay_ms", field_info)
-        # Contains "(Ms)" or "(ms)"
-        assert "(Ms)" in name or "(ms)" in name
+        name = _get_field_display_name("delay_seconds", field_info)
+        # Contains "(Seconds)" or "(seconds)"
+        assert "(Seconds)" in name or "(seconds)" in name
 
 
 class TestFormatValue:

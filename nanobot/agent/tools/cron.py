@@ -144,7 +144,7 @@ class CronTool(Tool):
         # Build schedule
         delete_after = False
         if every_seconds:
-            schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
+            schedule = CronSchedule(kind="every", every_seconds=every_seconds)
         elif cron_expr:
             effective_tz = tz or self._default_timezone
             if err := self._validate_timezone(effective_tz):
@@ -161,8 +161,8 @@ class CronTool(Tool):
                 if err := self._validate_timezone(self._default_timezone):
                     return err
                 dt = dt.replace(tzinfo=ZoneInfo(self._default_timezone))
-            at_ms = int(dt.timestamp() * 1000)
-            schedule = CronSchedule(kind="at", at_ms=at_ms)
+            at_seconds = int(dt.timestamp())
+            schedule = CronSchedule(kind="at", at_seconds=at_seconds)
             delete_after = True
         else:
             return "Error: either every_seconds, cron_expr, or at is required"
@@ -183,33 +183,31 @@ class CronTool(Tool):
         if schedule.kind == "cron":
             tz = f" ({schedule.tz})" if schedule.tz else ""
             return f"cron: {schedule.expr}{tz}"
-        if schedule.kind == "every" and schedule.every_ms:
-            ms = schedule.every_ms
-            if ms % 3_600_000 == 0:
-                return f"every {ms // 3_600_000}h"
-            if ms % 60_000 == 0:
-                return f"every {ms // 60_000}m"
-            if ms % 1000 == 0:
-                return f"every {ms // 1000}s"
-            return f"every {ms}ms"
-        if schedule.kind == "at" and schedule.at_ms:
-            return f"at {self._format_timestamp(schedule.at_ms, self._display_timezone(schedule))}"
+        if schedule.kind == "every" and schedule.every_seconds:
+            s = schedule.every_seconds
+            if s % 3600 == 0:
+                return f"every {s // 3600}h"
+            if s % 60 == 0:
+                return f"every {s // 60}m"
+            return f"every {s}s"
+        if schedule.kind == "at" and schedule.at_seconds:
+            return f"at {self._format_timestamp(schedule.at_seconds, self._display_timezone(schedule))}"
         return schedule.kind
 
     def _format_state(self, state: CronJobState, schedule: CronSchedule) -> list[str]:
         """Format job run state as display lines."""
         lines: list[str] = []
         display_tz = self._display_timezone(schedule)
-        if state.last_run_at_ms:
+        if state.last_run_at_seconds:
             info = (
-                f"  Last run: {self._format_timestamp(state.last_run_at_ms, display_tz)}"
+                f"  Last run: {self._format_timestamp(state.last_run_at_seconds, display_tz)}"
                 f" — {state.last_status or 'unknown'}"
             )
             if state.last_error:
                 info += f" ({state.last_error})"
             lines.append(info)
-        if state.next_run_at_ms:
-            lines.append(f"  Next run: {self._format_timestamp(state.next_run_at_ms, display_tz)}")
+        if state.next_run_at_seconds:
+            lines.append(f"  Next run: {self._format_timestamp(state.next_run_at_seconds, display_tz)}")
         return lines
 
     def _list_jobs(self) -> str:
