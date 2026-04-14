@@ -105,8 +105,8 @@ async def test_run_history_persisted_to_disk(tmp_path) -> None:
     history = raw["jobs"][0]["state"]["runHistory"]
     assert len(history) == 1
     assert history[0]["status"] == "ok"
-    assert "runAtSeconds" in history[0]
-    assert "durationSeconds" in history[0]
+    assert "runAtS" in history[0]
+    assert "durationS" in history[0]
 
     fresh = CronService(store_path)
     loaded = fresh.get_job(job.id)

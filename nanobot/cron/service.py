@@ -82,6 +82,75 @@ class CronService:
         self._timer_task: asyncio.Task | None = None
         self._running = False
 
+    def _migrate_short_keys(self, j: dict) -> dict:
+        """Migrate from shorthand keys (atS, everyS) to full keys (atSeconds, everySeconds)."""
+        import copy
+        j = copy.deepcopy(j)
+        
+        # Also handle old "atMs" -> "atS" -> "atSeconds"
+        schedule = j.get("schedule", {})
+        
+        # atMs -> atS (target format)
+        if "atMs" in schedule:
+            schedule["atS"] = schedule.pop("atMs") // 1000
+        if "atSeconds" in schedule:
+            schedule["atS"] = schedule.pop("atSeconds")
+        
+        # everyMs -> everyS (target format)
+        if "everyMs" in schedule:
+            schedule["everyS"] = schedule.pop("everyMs") // 1000
+        if "everySeconds" in schedule:
+            schedule["everyS"] = schedule.pop("everySeconds")
+        
+        # State: nextRunAtMs -> nextRunAtS (target format)
+        state = j.get("state", {})
+        if "nextRunAtMs" in state:
+            state["nextRunAtS"] = state.pop("nextRunAtMs") // 1000
+        if "nextRunAtSeconds" in state:
+            state["nextRunAtS"] = state.pop("nextRunAtSeconds")
+        
+        if "lastRunAtMs" in state:
+            state["lastRunAtS"] = state.pop("lastRunAtMs") // 1000
+        if "lastRunAtSeconds" in state:
+            state["lastRunAtS"] = state.pop("lastRunAtSeconds")
+            
+        # Run history: runAtMs -> runAtS (target format)
+        history = state.get("runHistory", [])
+        for r in history:
+            if "runAtMs" in r:
+                r["runAtS"] = r.pop("runAtMs") // 1000
+            if "runAtSeconds" in r:
+                r["runAtS"] = r.pop("runAtSeconds")
+        
+        # Top level: createdAtMs -> createdAtS, etc.
+        if "createdAtMs" in j:
+            j["createdAtS"] = j.pop("createdAtMs") // 1000
+        if "createdAtSeconds" in j:
+            j["createdAtS"] = j.pop("createdAtSeconds")
+        
+        if "updatedAtMs" in j:
+            j["updatedAtS"] = j.pop("updatedAtMs") // 1000
+        if "updatedAtSeconds" in j:
+            j["updatedAtS"] = j.pop("updatedAtSeconds")
+        
+        return j
+
+    def _needs_migration(self, j: dict) -> bool:
+        """Check if job needs any migration."""
+        schedule = j.get("schedule", {})
+        if any(k in schedule for k in ["atMs", "atSeconds", "everyMs", "everySeconds"]):
+            return True
+        state = j.get("state", {})
+        if any(k in state for k in ["nextRunAtMs", "nextRunAtSeconds", "lastRunAtMs", "lastRunAtSeconds"]):
+            return True
+        history = state.get("runHistory", [])
+        for r in history:
+            if any(k in r for k in ["runAtMs", "runAtSeconds", "durationMs", "durationSeconds"]):
+                return True
+        if any(k in j for k in ["createdAtMs", "createdAtSeconds", "updatedAtMs", "updatedAtSeconds"]):
+            return True
+        return False
+
     def _load_store(self) -> CronStore:
         """Load jobs from disk. Reloads automatically if file was modified externally."""
         if self._store and self.store_path.exists():
@@ -96,6 +165,7 @@ class CronService:
             try:
                 data = json.loads(self.store_path.read_text(encoding="utf-8"))
                 jobs = []
+                migrated = False
                 for j in data.get("jobs", []):
                     # Add null checks for required fields
                     if not j.get("id") or not j.get("name"):
@@ -104,14 +174,19 @@ class CronService:
                     if not schedule_data:
                         continue
 
+                    # Migrate from ms/short keys to full seconds keys if needed
+                    if self._needs_migration(j):
+                        j = self._migrate_short_keys(j)
+                        migrated = True
+
                     jobs.append(CronJob(
                         id=j["id"],
                         name=j["name"],
                         enabled=j.get("enabled", True),
                         schedule=CronSchedule(
                             kind=schedule_data.get("kind", "once"),
-                            at_seconds=schedule_data.get("atSeconds"),
-                            every_seconds=schedule_data.get("everySeconds"),
+                            at_seconds=schedule_data.get("atS"),
+                            every_seconds=schedule_data.get("everyS"),
                             expr=schedule_data.get("expr"),
                             tz=schedule_data.get("tz"),
                         ),
@@ -123,25 +198,31 @@ class CronService:
                             to=j["payload"].get("to"),
                         ),
                         state=CronJobState(
-                            next_run_at_seconds=j.get("state", {}).get("nextRunAtSeconds"),
-                            last_run_at_seconds=j.get("state", {}).get("lastRunAtSeconds"),
+                            next_run_at_seconds=j.get("state", {}).get("nextRunAtS"),
+                            last_run_at_seconds=j.get("state", {}).get("lastRunAtS"),
                             last_status=j.get("state", {}).get("lastStatus"),
                             last_error=j.get("state", {}).get("lastError"),
                             run_history=[
                                 CronRunRecord(
-                                    run_at_seconds=r["runAtSeconds"],
-                                    status=r["status"],
-                                    duration_seconds=r.get("durationSeconds", 0),
+                                    run_at_seconds=r.get("runAtS", 0),
+                                    status=r.get("status"),
+                                    duration_seconds=r.get("durationS", 0),
                                     error=r.get("error"),
                                 )
                                 for r in j.get("state", {}).get("runHistory", [])
                             ],
                         ),
-                        created_at_seconds=j.get("createdAtSeconds", 0),
-                        updated_at_seconds=j.get("updatedAtSeconds", 0),
+                        created_at_seconds=j.get("createdAtS", 0),
+                        updated_at_seconds=j.get("updatedAtS", 0),
                         delete_after_run=j.get("deleteAfterRun", False),
                     ))
+                
                 self._store = CronStore(jobs=jobs)
+                
+                # Save if we migrated data to disk
+                if migrated:
+                    logger.info("Cron: migrated jobs.json from ms to seconds format")
+                    self._save_store()
             except Exception as e:
                 logger.warning("Failed to load cron store: {}", e)
                 self._store = CronStore()
@@ -166,8 +247,8 @@ class CronService:
                     "enabled": j.enabled,
                     "schedule": {
                         "kind": j.schedule.kind,
-                        "atSeconds": j.schedule.at_seconds,
-                        "everySeconds": j.schedule.every_seconds,
+                        "atS": j.schedule.at_seconds,
+                        "everyS": j.schedule.every_seconds,
                         "expr": j.schedule.expr,
                         "tz": j.schedule.tz,
                     },
@@ -179,22 +260,22 @@ class CronService:
                         "to": j.payload.to,
                     },
                     "state": {
-                        "nextRunAtSeconds": j.state.next_run_at_seconds,
-                        "lastRunAtSeconds": j.state.last_run_at_seconds,
+                        "nextRunAtS": j.state.next_run_at_seconds,
+                        "lastRunAtS": j.state.last_run_at_seconds,
                         "lastStatus": j.state.last_status,
                         "lastError": j.state.last_error,
                         "runHistory": [
                             {
-                                "runAtSeconds": r.run_at_seconds,
+                                "runAtS": r.run_at_seconds,
                                 "status": r.status,
-                                "durationSeconds": r.duration_seconds,
+                                "durationS": r.duration_seconds,
                                 "error": r.error,
                             }
                             for r in j.state.run_history
                         ],
                     },
-                    "createdAtSeconds": j.created_at_seconds,
-                    "updatedAtSeconds": j.updated_at_seconds,
+                    "createdAtS": j.created_at_seconds,
+                    "updatedAtS": j.updated_at_seconds,
                     "deleteAfterRun": j.delete_after_run,
                 }
                 for j in self._store.jobs
