@@ -8,6 +8,7 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.agent.hooks import dispatch_file_hooks, get_global_registry
 from nanobot.agent.tools.base import Tool
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
@@ -242,11 +243,21 @@ class WriteFileTool(_FsTool):
                 raise ValueError("Unknown content")
             fp = self._resolve(path)
 
+            modified = await dispatch_file_hooks("before_write", fp, content, create_backup)
+            if modified is not None:
+                fp, content, create_backup = modified
+
+            validation = await dispatch_file_hooks("validate_content", fp, content)
+            if validation is not True:
+                return f"Validation failed: {validation}"
+
             if create_backup and fp.exists():
                 self._create_file_backup(fp)
+                await dispatch_file_hooks("on_backup_created", fp, fp)
 
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
+            await dispatch_file_hooks("after_write", fp, len(content))
             return f"Successfully wrote {len(content)} bytes to {fp}"
         except PermissionError as e:
             return f"Error: {e}"

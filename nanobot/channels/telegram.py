@@ -336,6 +336,8 @@ class TelegramChannel(BaseChannel):
         BotCommand("status", "Show bot status"),
         BotCommand("skills", "List available skills"),
         BotCommand("help", "Show available commands"),
+        BotCommand("dream", "Run memory consolidation"),
+        BotCommand("memory", "View memory status"),
     ]
 
     @classmethod
@@ -432,6 +434,8 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("status", self._forward_command))
         self._app.add_handler(CommandHandler("skills", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
+        self._app.add_handler(CommandHandler("dream", self._on_dream))
+        self._app.add_handler(CommandHandler("memory", self._on_memory))
 
         # Add config commands if enabled
         if self.config.config_writes:
@@ -1199,6 +1203,9 @@ class TelegramChannel(BaseChannel):
         if self.config.exec_approvals.enabled and self.config.exec_approvals.mode == "supervised":
             help_text += "\n/approve <id> — Approve exec request\n/deny <id> — Deny exec request"
 
+        # Add memory/dreaming commands
+        help_text += "\n/dream — Run memory consolidation\n/memory — View memory status"
+
         await update.message.reply_text(help_text)
 
     @staticmethod
@@ -1774,6 +1781,96 @@ class TelegramChannel(BaseChannel):
         for approver in self.config.exec_approvals.approvers:
             if approver == sender_id_clean:
                 return True
+
+        # Also allow users in allow_from (backwards compatibility)
+        for allowed in self.config.allow_from:
+            if allowed == sender_id_clean or allowed == "*":
+                return True
+
+        return False
+
+    # ==================== Dreaming / Memory ====================
+
+    async def _on_dream(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /dream command to run memory consolidation."""
+        if not update.message or not update.effective_user:
+            return
+
+        await update.message.reply_text("🌙 Running memory consolidation...")
+
+        try:
+            from nanobot.agent.memory import DreamingService, ShortTermRecallStore
+            from nanobot.providers.base import MockProvider
+
+            workspace = self.workspace or Path.home() / ".nanofoxy" / "agents" / "default"
+            memory_dir = workspace / "memory"
+
+            provider = MockProvider()  # Dummy provider
+            dreaming = DreamingService(
+                workspace=workspace,
+                provider=provider,
+                model="mock",
+                config=self.config.dreaming if hasattr(self.config, "dreaming") else None,
+            )
+
+            results = {
+                "light": await dreaming.run_light_phase(),
+                "deep": await dreaming.run_deep_phase(),
+                "rem": await dreaming.run_rem_phase(),
+            }
+
+            stats = dreaming.get_stats()
+            await update.message.reply_text(
+                f"🌙 Dreaming complete!\n\n"
+                f"• Light phase: {results['light']} candidates\n"
+                f"• Deep phase: {results['deep']} promoted\n"
+                f"• REM phase: {results['rem']} themes\n"
+                f"\nStats: {stats}"
+            )
+        except Exception as e:
+            logger.exception("Dreaming failed")
+            await update.message.reply_text(f"❌ Dreaming failed: {e}")
+
+    async def _on_memory(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /memory command to show memory status."""
+        if not update.message:
+            return
+
+        try:
+            workspace = self.workspace or Path.home() / ".nanofoxy" / "agents" / "default"
+            memory_dir = workspace / "memory"
+
+            memory_md = memory_dir / "MEMORY.md"
+            history_md = memory_dir / "HISTORY.md"
+
+            status = "📚 Memory Status:\n\n"
+
+            if memory_md.exists():
+                memory_size = len(memory_md.read_text())
+                status += f"• MEMORY.md: {memory_size} bytes\n"
+            else:
+                status += "• MEMORY.md: (empty)\n"
+
+            if history_md.exists():
+                history_lines = len(history_md.read_text().splitlines())
+                status += f"• HISTORY.md: {history_lines} lines\n"
+            else:
+                status += "• HISTORY.md: (empty)\n"
+
+            dreams_dir = memory_dir / ".dreams"
+            if dreams_dir.exists():
+                recalls = dreams_dir / "short-term-recall.json"
+                if recalls.exists():
+                    import json
+                    data = json.loads(recalls.read_text())
+                    status += f"• Short-term recalls: {len(data)} entries\n"
+
+            status += f"\nWorkspace: {workspace}"
+
+            await update.message.reply_text(status)
+        except Exception as e:
+            logger.exception("Memory status failed")
+            await update.message.reply_text(f"❌ Memory status failed: {e}")
 
         # Also allow if sender is in allow_from (for single-owner bots)
         for allowed in self.config.allow_from:

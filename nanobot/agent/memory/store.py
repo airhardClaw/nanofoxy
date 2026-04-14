@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
+from nanobot.agent.hooks import dispatch_memory_hooks, get_global_registry
 from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain
 
 if TYPE_CHECKING:
@@ -270,6 +271,8 @@ class MemoryStore:
         if not messages:
             return True
 
+        await dispatch_memory_hooks("before_consolidate", messages)
+
         current_memory = self.read_long_term()
         prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
 
@@ -344,9 +347,11 @@ class MemoryStore:
 
             self._consecutive_failures = 0
             logger.info("Memory consolidation done for {} messages", len(messages))
+            await dispatch_memory_hooks("after_consolidate", True, len(messages))
             return True
         except Exception:
             logger.exception("Memory consolidation failed")
+            await dispatch_memory_hooks("after_consolidate", False, len(messages))
             return self._fail_or_raw_archive(messages)
 
     def _fail_or_raw_archive(self, messages: list[dict]) -> bool:

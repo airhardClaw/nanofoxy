@@ -413,8 +413,9 @@ class CronService:
     def status(self) -> dict:
         """Get service status."""
         store = self._load_store()
+        next_wake = self._get_next_wake_seconds()
         return {
             "enabled": self._running,
             "jobs": len(store.jobs),
-            "next_wake_at_ms": self._get_next_wake_ms(),
+            "next_wake_at_seconds": next_wake,
         }

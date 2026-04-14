@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from nanobot.agent.hooks import dispatch_memory_hooks
 from nanobot.utils.helpers import ensure_dir
 
 if TYPE_CHECKING:
@@ -78,6 +79,12 @@ class ShortTermRecallStore:
         entries = self._load()
         entries.append(RecallEntry(entry_id=entry_id, query=query, score=score))
         self._save(entries)
+        try:
+            asyncio.get_event_loop().call_soon_threadsafe(
+                lambda: asyncio.create_task(dispatch_memory_hooks("on_recall", entry_id, query, score))
+            )
+        except RuntimeError:
+            pass
 
     def get_recalls(
         self,
@@ -301,6 +308,7 @@ class DreamingService:
         promoted_count = 0
         for entry_id, score in promoted:
             self.promotion_tracker.mark_promoted(entry_id)
+            await dispatch_memory_hooks("on_promote", entry_id, score)
             promoted_count += 1
             logger.info("Deep phase: promoted {} (score: {:.2f})", entry_id, score)
 
@@ -321,6 +329,9 @@ class DreamingService:
         themes = self._detect_themes(notes, min_strength, limit)
 
         if themes:
+            for theme in themes:
+                strength = float(theme.split("(")[1].split(")")[0].split()[1]) if "(" in theme else 0.5
+                await dispatch_memory_hooks("on_theme_detected", theme, strength)
             content = "\n\n".join(f"- {t}" for t in themes)
             self.daily_notes.append_to_note("REM Sleep", content)
             logger.info("REM phase: detected {} themes", len(themes))
