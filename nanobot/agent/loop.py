@@ -36,6 +36,7 @@ from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.speak import SpeakTool
+from nanobot.agent.tools.lfm_control import AudioControlTool
 from nanobot.agent.tools.system import SystemMonitorTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -181,6 +182,7 @@ class AgentLoop:
         self.tools.register(GrepTool(workspace=self.workspace, restrict_to_workspace=self.restrict_to_workspace))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpeakTool())
+        self.tools.register(AudioControlTool())
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(

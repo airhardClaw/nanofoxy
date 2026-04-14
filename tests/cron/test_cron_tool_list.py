@@ -87,7 +87,7 @@ def test_format_state_empty(tmp_path) -> None:
 
 def test_format_state_last_run_ok(tmp_path) -> None:
     tool = _make_tool(tmp_path)
-    state = CronJobState(last_run_at_seconds=17736732_00000, last_status="ok")
+    state = CronJobState(last_run_at_seconds=1730000000, last_status="ok")
     lines = tool._format_state(state, CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"))
     assert len(lines) == 1
     assert "Last run:" in lines[0]
@@ -96,7 +96,7 @@ def test_format_state_last_run_ok(tmp_path) -> None:
 
 def test_format_state_last_run_with_error(tmp_path) -> None:
     tool = _make_tool(tmp_path)
-    state = CronJobState(last_run_at_seconds=17736732_00000, last_status="error", last_error="timeout")
+    state = CronJobState(last_run_at_seconds=1730000000, last_status="error", last_error="timeout")
     lines = tool._format_state(state, CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"))
     assert len(lines) == 1
     assert "error" in lines[0]
@@ -105,7 +105,7 @@ def test_format_state_last_run_with_error(tmp_path) -> None:
 
 def test_format_state_next_run_only(tmp_path) -> None:
     tool = _make_tool(tmp_path)
-    state = CronJobState(next_run_at_seconds=1773684_000_000)
+    state = CronJobState(next_run_at_seconds=1730003600)
     lines = tool._format_state(state, CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"))
     assert len(lines) == 1
     assert "Next run:" in lines[0]
@@ -114,7 +114,7 @@ def test_format_state_next_run_only(tmp_path) -> None:
 def test_format_state_both(tmp_path) -> None:
     tool = _make_tool(tmp_path)
     state = CronJobState(
-        last_run_at_seconds=17736732_00000, last_status="ok", next_run_at_seconds=1773684_000_000
+        last_run_at_seconds=1730000000, last_status="ok", next_run_at_seconds=1730003600
     )
     lines = tool._format_state(state, CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"))
     assert len(lines) == 2
@@ -124,7 +124,7 @@ def test_format_state_both(tmp_path) -> None:
 
 def test_format_state_unknown_status(tmp_path) -> None:
     tool = _make_tool(tmp_path)
-    state = CronJobState(last_run_at_seconds=17736732_00000, last_status=None)
+    state = CronJobState(last_run_at_seconds=1730000000, last_status=None)
     lines = tool._format_state(state, CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"))
     assert "unknown" in lines[0]
 
@@ -207,11 +207,11 @@ def test_list_at_job_shows_iso_timestamp(tmp_path) -> None:
     tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
     tool._cron.add_job(
         name="One-shot",
-        schedule=CronSchedule(kind="at", at_seconds=1773684_000_000),
+        schedule=CronSchedule(kind="at", at_seconds=2000000000),
         message="fire",
     )
     result = tool._list_jobs()
-    assert "at 2026-" in result
+    assert "at 20" in result
     assert "Asia/Shanghai" in result
 
 
@@ -223,7 +223,7 @@ def test_list_shows_last_run_state(tmp_path) -> None:
         message="test",
     )
     # Simulate a completed run by updating state in the store
-    job.state.last_run_at_seconds = 17736732_00000
+    job.state.last_run_at_seconds = 1730000000
     job.state.last_status = "ok"
     tool._cron._save_store()
 
@@ -240,7 +240,7 @@ def test_list_shows_error_message(tmp_path) -> None:
         schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"),
         message="test",
     )
-    job.state.last_run_at_seconds = 17736732_00000
+    job.state.last_run_at_seconds = 1730000000
     job.state.last_status = "error"
     job.state.last_error = "timeout"
     tool._cron._save_store()

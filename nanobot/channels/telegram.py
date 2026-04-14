@@ -1799,18 +1799,25 @@ class TelegramChannel(BaseChannel):
         await update.message.reply_text("🌙 Running memory consolidation...")
 
         try:
-            from nanobot.agent.memory import DreamingService, ShortTermRecallStore
-            from nanobot.providers.base import MockProvider
+            from nanobot.agent.memory import DreamingService
 
             workspace = self.workspace or Path.home() / ".nanofoxy" / "agents" / "default"
-            memory_dir = workspace / "memory"
 
-            provider = MockProvider()  # Dummy provider
+            class DummyProvider:
+                """Dummy provider for dreaming - phases don't use LLM."""
+                model = "mock"
+                def chat_with_retry(self, **kwargs):
+                    return None
+
+            config = None
+            if hasattr(self.config, 'dreaming'):
+                config = self.config.dreaming
+
             dreaming = DreamingService(
                 workspace=workspace,
-                provider=provider,
+                provider=DummyProvider(),
                 model="mock",
-                config=self.config.dreaming if hasattr(self.config, "dreaming") else None,
+                config=config,
             )
 
             results = {

@@ -47,10 +47,10 @@ class CronTool(Tool):
         return schedule.tz or self._default_timezone
 
     @staticmethod
-    def _format_timestamp(ms: int, tz_name: str) -> str:
+    def _format_timestamp(seconds: int, tz_name: str) -> str:
         from zoneinfo import ZoneInfo
 
-        dt = datetime.fromtimestamp(ms / 1000, tz=ZoneInfo(tz_name))
+        dt = datetime.fromtimestamp(seconds, tz=ZoneInfo(tz_name))
         return f"{dt.isoformat()} ({tz_name})"
 
     @property

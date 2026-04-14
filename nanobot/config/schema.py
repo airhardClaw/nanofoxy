@@ -306,6 +306,34 @@ class DreamingConfig(Base):
     rem: DreamingREMConfig = Field(default_factory=DreamingREMConfig)
 
 
+class AudioConfig(Base):
+    """Audio/LFM server configuration."""
+
+    enabled: bool = True
+    model_path: str = Field(
+        default="",
+        description="Path to LFM model file (e.g., /home/sir-airhard/.nanobot/lfm2.5-audio-models/LFM2.5-Audio-1.5B-Q8_0.gguf)"
+    )
+    mmproj_path: str = Field(
+        default="",
+        description="Path to mmproj file"
+    )
+    vocoder_path: str = Field(
+        default="",
+        description="Path to vocoder file"
+    )
+    tokenizer_path: str = Field(
+        default="",
+        description="Path to tokenizer file"
+    )
+    runner_path: str = Field(
+        default="",
+        description="Path to llama-liquid-audio runner"
+    )
+    host: str = "127.0.0.1"
+    port: int = 2026
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
@@ -315,6 +343,7 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     paperclip: PaperclipConfig = Field(default_factory=PaperclipConfig)  # Paperclip integration
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    audio: AudioConfig = Field(default_factory=AudioConfig)
 
 
 class LangfuseConfig(Base):
