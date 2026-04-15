@@ -250,6 +250,7 @@ class TelegramGroupConfig(Base):
     skills: list[str] | None = None
     system_prompt: str | None = None
     enabled: bool | None = None
+    tts_mode: Literal["off", "on", "auto"] | None = None
     topics: dict[str, TelegramTopicConfig] = Field(default_factory=dict)
 
 
@@ -307,6 +308,9 @@ class TelegramConfig(Base):
     # Config Writes
     config_writes: bool = True
 
+    # TTS Mode (off, on, auto)
+    tts_mode: Literal["off", "on", "auto"] = "off"
+
     # Per-group and per-topic overrides
     groups: dict[str, TelegramGroupConfig] = Field(default_factory=dict)
 
@@ -329,15 +333,17 @@ class TelegramChannel(BaseChannel):
 
     # Commands registered with Telegram's command menu
     BOT_COMMANDS = [
-        BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
-        BotCommand("stop", "Stop the current task"),
-        BotCommand("restart", "Restart the bot"),
-        BotCommand("status", "Show bot status"),
-        BotCommand("skills", "List available skills"),
-        BotCommand("help", "Show available commands"),
         BotCommand("dream", "Run memory consolidation"),
+        BotCommand("skills", "List available skills"),
+        BotCommand("status", "Show bot status"),
         BotCommand("memory", "View memory status"),
+        BotCommand("stop", "Stop the current task"),
+        BotCommand("config", "View or update bot configuration"),
+        BotCommand("restart", "Restart the bot"),
+        BotCommand("start", "Start the bot"),
+        BotCommand("help", "Show available commands"),
+        BotCommand("tts", "Toggle voice responses (on/off/auto)"),
     ]
 
     @classmethod
@@ -346,12 +352,13 @@ class TelegramChannel(BaseChannel):
 
     _STREAM_EDIT_INTERVAL = 0.6  # min seconds between edit_message_text calls
 
-    def __init__(self, config: Any, bus: MessageBus, workspace: str | None = None):
+    def __init__(self, config: Any, bus: MessageBus, workspace: str | None = None, provider: Any = None):
         if isinstance(config, dict):
             config = TelegramConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.workspace = Path(workspace) if workspace else None
+        self._provider = provider  # Real LLM provider from config
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -436,10 +443,10 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("help", self._on_help))
         self._app.add_handler(CommandHandler("dream", self._on_dream))
         self._app.add_handler(CommandHandler("memory", self._on_memory))
+        self._app.add_handler(CommandHandler("tts", self._on_tts))
 
-        # Add config commands if enabled
-        if self.config.config_writes:
-            self._app.add_handler(CommandHandler("config", self._on_config))
+        # Add config command (always available)
+        self._app.add_handler(CommandHandler("config", self._on_config))
 
         # Add exec approval commands if enabled
         if self.config.exec_approvals.enabled and self.config.exec_approvals.mode == "supervised":
@@ -1017,6 +1024,35 @@ class TelegramChannel(BaseChannel):
                     await self._handle_send_error(str(chat_id), e)
                     raise
 
+            # If TTS is enabled, generate and send audio after text
+            chat_id_str = str(chat_id)
+            if self.is_tts_enabled(chat_id_str) and msg.content and msg.content != "[empty message]":
+                await self._generate_and_send_tts(chat_id, msg.content)
+
+    async def _generate_and_send_tts(self, chat_id: int, text: str) -> None:
+        """Generate TTS audio and send to chat."""
+        try:
+            # Import SpeakTool
+            from nanobot.agent.tools.speak import SpeakTool
+
+            speak_tool = SpeakTool(workspace=str(self.workspace) if self.workspace else None)
+            result = await speak_tool.execute(text=text)
+
+            # Check if audio was generated (not an error)
+            if result.startswith("Audio generated:"):
+                import re
+                match = re.search(r"Audio generated: (\S+)", result)
+                if match:
+                    audio_path = match.group(1)
+                    with open(audio_path, "rb") as f:
+                        await self._app.bot.send_voice(chat_id=chat_id, voice=f)
+                    # Clean up temp file
+                    import os
+                    os.unlink(audio_path)
+                    logger.info("TTS audio sent to chat {}", chat_id)
+        except Exception as e:
+            logger.warning("TTS generation failed: {}", e)
+
     async def _send_text(
         self,
         bot,
@@ -1173,7 +1209,7 @@ class TelegramChannel(BaseChannel):
 
         user = update.effective_user
         await update.message.reply_text(
-            f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
+            f"👋 Hi {user.first_name}! I'm NanoFoxy.\n\n"
             "Send me a message and I'll respond!\n"
             "Type /help to see available commands."
         )
@@ -1185,7 +1221,7 @@ class TelegramChannel(BaseChannel):
 
         # Build help text based on enabled features
         help_text = (
-            "🐈 nanobot commands:\n"
+            "🐈 NanoFoxy commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
             "/restart — Restart the bot\n"
@@ -1195,9 +1231,7 @@ class TelegramChannel(BaseChannel):
             "/help — Show available commands"
         )
 
-        # Add config commands if enabled
-        if self.config.config_writes:
-            help_text += "\n/config — View or modify config"
+        help_text += "\n/config — View or modify config"
 
         # Add exec approval commands if enabled
         if self.config.exec_approvals.enabled and self.config.exec_approvals.mode == "supervised":
@@ -1205,6 +1239,9 @@ class TelegramChannel(BaseChannel):
 
         # Add memory/dreaming commands
         help_text += "\n/dream — Run memory consolidation\n/memory — View memory status"
+
+        # Add TTS commands
+        help_text += "\n/tts on — Enable voice responses\n/tts off — Disable voice responses\n/tts — Show TTS status"
 
         await update.message.reply_text(help_text)
 
@@ -1803,11 +1840,24 @@ class TelegramChannel(BaseChannel):
 
             workspace = self.workspace or Path.home() / ".nanofoxy" / "agents" / "default"
 
-            class DummyProvider:
-                """Dummy provider for dreaming - phases don't use LLM."""
-                model = "mock"
-                def chat_with_retry(self, **kwargs):
-                    return None
+            # Use real provider from config
+            provider = self._provider
+            model = "mock"
+            if provider:
+                model = getattr(provider, "model", "mock")
+            else:
+                from nanobot.config.loader import load_config
+                try:
+                    from nanobot.cli.commands import _make_provider
+                    config = load_config()
+                    provider = _make_provider(config)
+                    model = config.agents.defaults.model
+                except Exception:
+                    class DummyProvider:
+                        model = "mock"
+                        def chat_with_retry(self, **kwargs):
+                            return None
+                    provider = DummyProvider()
 
             config = None
             if hasattr(self.config, 'dreaming'):
@@ -1815,8 +1865,8 @@ class TelegramChannel(BaseChannel):
 
             dreaming = DreamingService(
                 workspace=workspace,
-                provider=DummyProvider(),
-                model="mock",
+                provider=provider,
+                model=model,
                 config=config,
             )
 
@@ -1878,6 +1928,59 @@ class TelegramChannel(BaseChannel):
         except Exception as e:
             logger.exception("Memory status failed")
             await update.message.reply_text(f"❌ Memory status failed: {e}")
+
+    async def _on_tts(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /tts command to toggle TTS mode."""
+        if not update.message or not update.effective_user:
+            return
+
+        chat_id = str(update.message.chat.id)
+        args = update.message.text.split()[1:] if len(update.message.text.split()) > 1 else []
+
+        # Determine new TTS mode from arguments
+        if args:
+            arg = args[0].lower()
+            if arg in ["on", "off", "auto"]:
+                mode = arg
+            else:
+                await update.message.reply_text(f"Usage: /tts [on|off|auto]\n• on - always speak responses\n• off - text only (default)\n• auto - decide per message")
+                return
+        else:
+            # Show current TTS status
+            current = self.config.tts_mode
+            await update.message.reply_text(f"🔊 TTS Mode: {current}\n\nSend /tts on, /tts off, or /tts auto to change.")
+            return
+
+        # Check for per-chat TTS settings (stored in groups config)
+        if chat_id in self.config.groups:
+            old_mode = getattr(self.config.groups[chat_id], 'tts_mode', None)
+            if old_mode != mode:
+                await update.message.reply_text(f"🔊 TTS mode changed to: {mode}")
+        else:
+            if self.config.tts_mode != mode:
+                await update.message.reply_text(f"🔊 TTS mode changed to: {mode}")
+
+        # Store in group config for persistence
+        if chat_id not in self.config.groups:
+            self.config.groups[chat_id] = TelegramGroupConfig()
+        self.config.groups[chat_id].tts_mode = mode
+
+        # Save config
+        await self._save_config_overrides()
+
+        emoji = "🔊" if mode == "on" else "📝" if mode == "off" else "🤖"
+        await update.message.reply_text(f"{emoji} TTS mode set to: {mode}")
+
+    def is_tts_enabled(self, chat_id: str) -> bool:
+        """Check if TTS is enabled for a chat."""
+        # Check per-chat/group config first
+        if chat_id in self.config.groups:
+            group_mode = getattr(self.config.groups[chat_id], 'tts_mode', None)
+            if group_mode:
+                return group_mode == "on"
+
+        # Fall back to global config
+        return self.config.tts_mode == "on"
 
         # Also allow if sender is in allow_from (for single-owner bots)
         for allowed in self.config.allow_from:

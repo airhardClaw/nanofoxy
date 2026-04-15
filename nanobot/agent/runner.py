@@ -53,10 +53,35 @@ class AgentRunResult:
 
 
 class AgentRunner:
-    """Run a tool-capable LLM loop without product-layer concerns."""
+    """Run a tool-capable LLM loop without product-layer concerns.
+    
+    Accepts either a raw LLMProvider or a ModelRouter for dynamic model selection.
+    """
 
-    def __init__(self, provider: LLMProvider):
-        self.provider = provider
+    def __init__(self, provider_or_router):
+        # Support both raw provider and ModelRouter
+        from nanobot.agent.router import ModelRouter
+        if isinstance(provider_or_router, ModelRouter):
+            self.provider = provider_or_router.provider
+            self.router = provider_or_router
+        else:
+            self.provider = provider_or_router
+            self.router = None
+    
+    def _get_chat_method(self):
+        """Get the appropriate chat method to use.
+        
+        Prefers:
+        1. ModelRouter (for dynamic model selection)
+        2. chat_with_retry (standard retry wrapper)
+        3. chat (fallback)
+        """
+        if self.router:
+            return self.router.chat
+        if hasattr(self.provider, 'chat_with_retry'):
+            # Use chat_with_retry which has proper retry logic
+            return self.provider.chat_with_retry
+        return self.provider.chat
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
@@ -88,16 +113,20 @@ class AgentRunner:
                 kwargs["reasoning_effort"] = spec.reasoning_effort
 
             llm_start = time.perf_counter()
+            
+            # Get the appropriate chat method (router or provider with retry)
+            chat_method = self._get_chat_method()
+            
             if hook.wants_streaming():
                 async def _stream(delta: str) -> None:
                     await hook.on_stream(context, delta)
 
-                response = await self.provider.chat_stream_with_retry(
+                response = await chat_method(
                     **kwargs,
                     on_content_delta=_stream,
                 )
             else:
-                response = await self.provider.chat_with_retry(**kwargs)
+                response = await chat_method(**kwargs)
             llm_time = time.perf_counter() - llm_start
             total_llm_time += llm_time
 

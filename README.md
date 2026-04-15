@@ -106,6 +106,35 @@ nanobot gateway      # Start with all enabled channels
 }
 ```
 
+### TTS (Text-to-Speech)
+
+Enable voice responses in Telegram using LFM2.5-Audio:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "YOUR_BOT_TOKEN",
+      "tts_mode": "off"  // off, on, or auto
+    }
+  }
+}
+```
+
+**TTS Modes:**
+- `off` - Text only responses (default)
+- `on` - Always speak responses via LFM2.5-Audio
+- `auto` - Agent decides when to speak
+
+**Commands:**
+- `/tts on` - Enable voice responses
+- `/tts off` - Disable voice responses  
+- `/tts auto` - Let agent decide
+- `/tts` - Show current TTS status
+
+Note: TTS requires LFM2.5-Audio model files in `~/.nanobot/lfm2.5-audio-models/`
+
 ## Providers
 
 | Provider | Description |

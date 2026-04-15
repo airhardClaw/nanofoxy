@@ -1,6 +1,7 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import json
 import os
 import select
 import signal
@@ -593,7 +594,13 @@ def gateway(
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
-    # Create agent with cron service
+    # Create A2A server (registry + task manager)
+    from nanobot.agent.a2a.registry import AgentRegistry
+    from nanobot.agent.a2a.task_manager import TaskManager
+    a2a_registry = AgentRegistry(config.workspace_path)
+    a2a_task_manager = TaskManager()
+
+    # Create agent with cron service and A2A
     web_config = config.tools.web
     web_tools_enabled = web_config.enabled if hasattr(web_config, 'enabled') else True
     agent = AgentLoop(
@@ -615,6 +622,10 @@ def gateway(
         timezone=config.agents.defaults.timezone,
         memory_config=config.tools.memory.model_dump(by_alias=True),
         agent_id="default",
+        a2a_registry=a2a_registry,
+        a2a_task_manager=a2a_task_manager,
+        orchestrator_model=config.agents.defaults.orchestrator_model,
+        worker_model=config.agents.defaults.worker_model,
     )
 
     # Set cron callback (needs agent)
@@ -665,8 +676,8 @@ def gateway(
         return response
     cron.on_job = on_cron_job
 
-    # Create channel manager
-    channels = ChannelManager(config, bus)
+    # Create channel manager with provider
+    channels = ChannelManager(config, bus, provider=provider)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -778,6 +789,40 @@ Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         enabled=hb_cfg.enabled,
         timezone=config.agents.defaults.timezone,
     )
+
+    # Register subagent heartbeat callbacks
+    subagent_dir = config.workspace_path / ".subagents"
+    if subagent_dir.exists():
+        for config_file in subagent_dir.glob("*.json"):
+            if config_file.name == "config.json":
+                continue
+            try:
+                subagent_config = json.loads(config_file.read_text(encoding="utf-8"))
+                subagent_id = config_file.stem
+                heartbeat_config = subagent_config.get("heartbeat", {})
+                if heartbeat_config.get("enabled", False):
+                    role = subagent_config.get("role", subagent_id)
+                    task = heartbeat_config.get("task", "")
+                    allowed_chats = subagent_config.get("allowed_chats", [])
+                    origin_chat = allowed_chats[0] if allowed_chats else "direct"
+                    
+                    async def make_callback(sid: str, r: str, t: str, oc: str):
+                        async def callback(task_str: str) -> str:
+                            result = await agent.subagents.spawn_with_role(
+                                task=task_str,
+                                role=r,
+                                subagent_id=sid,
+                                origin_channel="telegram",
+                                origin_chat_id=oc,
+                            )
+                            return result
+                        return callback
+                    
+                    callback = asyncio.run(make_callback(subagent_id, role, task, origin_chat))
+                    heartbeat.register_subagent_callback(subagent_id, callback)
+                    console.print(f"[green]✓[/green] Subagent heartbeat: {subagent_id} ({heartbeat_config.get('interval_s', 1800)}s)")
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse subagent config: {}", config_file.name)
 
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
@@ -959,6 +1004,12 @@ def agent(
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
+    # Create A2A server (registry + task manager) for CLI mode
+    from nanobot.agent.a2a.registry import AgentRegistry
+    from nanobot.agent.a2a.task_manager import TaskManager
+    a2a_registry = AgentRegistry(config.workspace_path)
+    a2a_task_manager = TaskManager()
+
     if logs:
         logger.enable("nanobot")
     else:
@@ -982,6 +1033,10 @@ def agent(
         timezone=config.agents.defaults.timezone,
         memory_config=config.tools.memory.model_dump(by_alias=True),
         agent_id="default",
+        a2a_registry=a2a_registry,
+        a2a_task_manager=a2a_task_manager,
+        orchestrator_model=config.agents.defaults.orchestrator_model,
+        worker_model=config.agents.defaults.worker_model,
     )
 
     # Shared reference for progress callbacks

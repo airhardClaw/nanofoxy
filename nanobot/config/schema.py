@@ -59,6 +59,9 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 30
     reasoning_effort: str | None = None
     timezone: str = "UTC"
+    # Model routing - use different models for orchestration vs work
+    orchestrator_model: str = "lfm2.5-1.2b-thinking-claude"  # Thinking model for planning/routing
+    worker_model: str = "lfm2.5-1.2b-instruct"  # Instruct model for tool execution
 
 
 class AgentsConfig(Base):

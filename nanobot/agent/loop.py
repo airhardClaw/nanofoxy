@@ -49,6 +49,8 @@ from nanobot.utils.helpers import smart_truncate_messages
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
     from nanobot.cron.service import CronService
+    from nanobot.agent.a2a.registry import AgentRegistry
+    from nanobot.agent.a2a.task_manager import TaskManager
 
 
 class AgentLoop:
@@ -85,14 +87,28 @@ class AgentLoop:
         timezone: str | None = None,
         memory_config: dict[str, Any] | None = None,
         agent_id: str = "default",
+        a2a_registry: Optional[AgentRegistry] = None,
+        a2a_task_manager: Optional[TaskManager] = None,
+        orchestrator_model: str | None = None,
+        worker_model: str | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
+        from nanobot.agent.router import ModelRouter
 
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        
+        # Model routing
+        self.orchestrator_model = orchestrator_model or self.model
+        self.worker_model = worker_model or "lfm2.5-1.2b-instruct"
+        self.model_router = ModelRouter(
+            provider=provider,
+            orchestrator_model=self.orchestrator_model,
+            worker_model=self.worker_model,
+        )
         self.max_iterations = max_iterations
         self.context_window_tokens = context_window_tokens
         self.web_search_config = web_search_config or WebSearchConfig()
@@ -101,18 +117,20 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self._a2a_registry = a2a_registry
+        self._a2a_task_manager = a2a_task_manager
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
 
         self.context = ContextBuilder(workspace, timezone=timezone)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
-        self.runner = AgentRunner(provider)
+        self.runner = AgentRunner(self.model_router)
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
             bus=bus,
-            model=self.model,
+            model=self.worker_model,  # Subagents use worker model by default
             web_search_config=self.web_search_config,
             web_proxy=web_proxy,
             web_tools_enabled=web_tools_enabled,
@@ -183,7 +201,30 @@ class AgentLoop:
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpeakTool())
         self.tools.register(AudioControlTool())
-        self.tools.register(SpawnTool(manager=self.subagents))
+        self.tools.register(SpawnTool(manager=self.subagents, registry=self._a2a_registry))
+        
+        # Register A2A tools if A2A server is configured
+        if self._a2a_registry and self._a2a_task_manager:
+            from nanobot.agent.tools.a2a import A2ATool
+            from nanobot.agent.tools.a2a_control import A2AControlTool
+            from nanobot.agent.tools.a2a_status import A2AStatusTool
+            
+            self.tools.register(A2ATool(
+                registry=self._a2a_registry,
+                task_manager=self._a2a_task_manager,
+                subagent_manager=self.subagents,
+            ))
+            self.tools.register(A2AControlTool(
+                registry=self._a2a_registry,
+                task_manager=self._a2a_task_manager,
+                workspace=self.workspace,
+            ))
+            self.tools.register(A2AStatusTool(
+                registry=self._a2a_registry,
+                task_manager=self._a2a_task_manager,
+                workspace=self.workspace,
+            ))
+        
         if self.cron_service:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")

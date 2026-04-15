@@ -129,6 +129,51 @@ class SubagentManager:
         logger.info("Spawned subagent [{}] with role {}", task_id, role)
         return f"Subagent [{role}] started (id: {task_id}). I'll report back when it's done."
 
+    async def call_agent(
+        self,
+        target_subagent_id: str,
+        task: str,
+        origin_channel: str = "cli",
+        origin_chat_id: str = "direct",
+    ) -> str:
+        """Call another subagent directly (peer-to-peer A2A).
+        
+        This allows subagents to communicate with each other without
+        going through the chief agent.
+        
+        Args:
+            target_subagent_id: Target subagent ID to call
+            task: Task to send to the target subagent
+            origin_channel: Original channel (for result routing)
+            origin_chat_id: Original chat ID (for result routing)
+            
+        Returns:
+            Result from the target subagent
+        """
+        # Load target subagent config
+        target_config = self._load_subagent_config(target_subagent_id)
+        if not target_config:
+            return f"Error: Target subagent '{target_subagent_id}' not found"
+        
+        if not target_config.get("enabled", True):
+            return f"Error: Target subagent '{target_subagent_id}' is disabled"
+        
+        target_role = target_config.get("role", target_subagent_id)
+        
+        logger.info("Subagent calling peer-to-peer: {} -> {}", 
+                   self.__class__.__name__, target_subagent_id)
+        
+        # Run the target subagent
+        result = await self.spawn_with_role(
+            task=task,
+            role=target_role,
+            subagent_id=target_subagent_id,
+            origin_channel=origin_channel,
+            origin_chat_id=origin_chat_id,
+        )
+        
+        return result
+
     def _load_role(self, role_name: str) -> str | None:
         """Load role definition from roles directory."""
         # First check workspace/roles

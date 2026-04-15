@@ -10,6 +10,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.registry import discover_all
 from nanobot.config.schema import Config
 
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
@@ -26,17 +27,11 @@ class ChannelManager:
     - Route outbound messages
     """
 
-    def __init__(self, config: Config, bus: MessageBus):
+    def __init__(self, config: Config, bus: MessageBus, provider: Any = None):
         self.config = config
         self.bus = bus
+        self._provider = provider
         self.channels: dict[str, BaseChannel] = {}
-        self._dispatch_task: asyncio.Task | None = None
-
-        self._init_channels()
-
-    def _init_channels(self) -> None:
-        """Initialize channels discovered via pkgutil scan + entry_points plugins."""
-        from nanobot.channels.registry import discover_all
 
         groq_key = self.config.providers.groq.api_key
 
@@ -52,9 +47,9 @@ class ChannelManager:
             if not enabled:
                 continue
             try:
-                # Pass workspace path to Telegram channel
+                # Pass workspace path and provider to Telegram channel
                 if name == "telegram":
-                    channel = cls(section, self.bus, workspace=str(self.config.workspace_path))
+                    channel = cls(section, self.bus, workspace=str(self.config.workspace_path), provider=provider)
                 else:
                     channel = cls(section, self.bus)
                 channel.transcription_api_key = groq_key

@@ -83,60 +83,88 @@ class CronService:
         self._running = False
 
     def _migrate_short_keys(self, j: dict) -> dict:
-        """Migrate from shorthand keys (atS, everyS) to full keys (atSeconds, everySeconds)."""
+        """Migrate from millisecond keys to seconds keys.
+        
+        Legacy format used milliseconds (atMs, everyMs, nextRunAtMs, etc.)
+        Current format uses seconds (atS, everyS, nextRunAtS, etc.)
+        
+        Also fixes corrupted values where "S" suffix keys were incorrectly divided by 1000.
+        """
         import copy
         j = copy.deepcopy(j)
         
-        # Also handle old "atMs" -> "atS" -> "atSeconds"
         schedule = j.get("schedule", {})
         
-        # atMs -> atS (target format)
-        if "atMs" in schedule:
+        # atMs (milliseconds) -> atS (seconds)
+        if "atMs" in schedule and schedule["atMs"] is not None:
             schedule["atS"] = schedule.pop("atMs") // 1000
-        if "atSeconds" in schedule:
+        elif "atSeconds" in schedule and schedule["atSeconds"] is not None:
             schedule["atS"] = schedule.pop("atSeconds")
         
-        # everyMs -> everyS (target format)
-        if "everyMs" in schedule:
+        # everyMs (milliseconds) -> everyS (seconds)
+        if "everyMs" in schedule and schedule["everyMs"] is not None:
             schedule["everyS"] = schedule.pop("everyMs") // 1000
-        if "everySeconds" in schedule:
+        elif "everySeconds" in schedule and schedule["everySeconds"] is not None:
             schedule["everyS"] = schedule.pop("everySeconds")
         
-        # State: nextRunAtMs -> nextRunAtS (target format)
         state = j.get("state", {})
-        if "nextRunAtMs" in state:
-            state["nextRunAtS"] = state.pop("nextRunAtMs") // 1000
-        if "nextRunAtSeconds" in state:
-            state["nextRunAtS"] = state.pop("nextRunAtSeconds")
         
-        if "lastRunAtMs" in state:
+        # nextRunAtMs (milliseconds) -> nextRunAtS (seconds)
+        if "nextRunAtMs" in state and state["nextRunAtMs"] is not None:
+            state["nextRunAtS"] = state.pop("nextRunAtMs") // 1000
+        elif "nextRunAtSeconds" in state and state["nextRunAtSeconds"] is not None:
+            state["nextRunAtS"] = state.pop("nextRunAtSeconds")
+        elif "nextRunAtS" in state and state["nextRunAtS"] is not None and state["nextRunAtS"] < 1000000000:
+            # Corrupted: value was incorrectly divided by 1000, reverse it
+            state["nextRunAtS"] = state["nextRunAtS"] * 1000
+        
+        # lastRunAtMs (milliseconds) -> lastRunAtS (seconds)
+        if "lastRunAtMs" in state and state["lastRunAtMs"] is not None:
             state["lastRunAtS"] = state.pop("lastRunAtMs") // 1000
-        if "lastRunAtSeconds" in state:
+        elif "lastRunAtSeconds" in state and state["lastRunAtSeconds"] is not None:
             state["lastRunAtS"] = state.pop("lastRunAtSeconds")
+        elif "lastRunAtS" in state and state["lastRunAtS"] is not None and state["lastRunAtS"] < 1000000000:
+            # Corrupted: value was incorrectly divided by 1000, reverse it
+            state["lastRunAtS"] = state["lastRunAtS"] * 1000
             
-        # Run history: runAtMs -> runAtS (target format)
         history = state.get("runHistory", [])
         for r in history:
-            if "runAtMs" in r:
+            # runAtMs (milliseconds) -> runAtS (seconds)
+            if "runAtMs" in r and r["runAtMs"] is not None:
                 r["runAtS"] = r.pop("runAtMs") // 1000
-            if "runAtSeconds" in r:
+            elif "runAtSeconds" in r and r["runAtSeconds"] is not None:
                 r["runAtS"] = r.pop("runAtSeconds")
+            elif "runAtS" in r and r["runAtS"] is not None and r["runAtS"] < 1000000000:
+                # Corrupted: value was incorrectly divided by 1000, reverse it
+                r["runAtS"] = r["runAtS"] * 1000
         
-        # Top level: createdAtMs -> createdAtS, etc.
-        if "createdAtMs" in j:
+        # createdAtMs (milliseconds) -> createdAtS (seconds)
+        if "createdAtMs" in j and j["createdAtMs"] is not None:
             j["createdAtS"] = j.pop("createdAtMs") // 1000
-        if "createdAtSeconds" in j:
+        elif "createdAtSeconds" in j and j["createdAtSeconds"] is not None:
             j["createdAtS"] = j.pop("createdAtSeconds")
+        elif "createdAtS" in j and j["createdAtS"] is not None and j["createdAtS"] < 1000000000:
+            # Corrupted: value was incorrectly divided by 1000, reverse it
+            j["createdAtS"] = j["createdAtS"] * 1000
         
-        if "updatedAtMs" in j:
+        # updatedAtMs (milliseconds) -> updatedAtS (seconds)
+        if "updatedAtMs" in j and j["updatedAtMs"] is not None:
             j["updatedAtS"] = j.pop("updatedAtMs") // 1000
-        if "updatedAtSeconds" in j:
+        elif "updatedAtSeconds" in j and j["updatedAtSeconds"] is not None:
             j["updatedAtS"] = j.pop("updatedAtSeconds")
+        elif "updatedAtS" in j and j["updatedAtS"] is not None and j["updatedAtS"] < 1000000000:
+            # Corrupted: value was incorrectly divided by 1000, reverse it
+            j["updatedAtS"] = j["updatedAtS"] * 1000
         
         return j
 
     def _needs_migration(self, j: dict) -> bool:
-        """Check if job needs any migration."""
+        """Check if job needs migration from milliseconds to seconds format.
+        
+        Migration is needed when:
+        1. Legacy "Ms" or "Seconds" suffix keys exist, OR
+        2. Values look corrupted (too small to be valid Unix timestamps in seconds)
+        """
         schedule = j.get("schedule", {})
         if any(k in schedule for k in ["atMs", "atSeconds", "everyMs", "everySeconds"]):
             return True
@@ -145,10 +173,20 @@ class CronService:
             return True
         history = state.get("runHistory", [])
         for r in history:
-            if any(k in r for k in ["runAtMs", "runAtSeconds", "durationMs", "durationSeconds"]):
+            if any(k in r for k in ["runAtMs", "runAtSeconds"]):
                 return True
         if any(k in j for k in ["createdAtMs", "createdAtSeconds", "updatedAtMs", "updatedAtSeconds"]):
             return True
+        
+        # Also check for corrupted "S" suffix values (divided by 1000 incorrectly)
+        # Valid Unix timestamp in seconds should be > 1 billion (year ~2001)
+        # If nextRunAtS or lastRunAtS < 1000000000, they were likely corrupted
+        # (original ms value was divided by 1000, turning e.g. 1776098000000 into 1776098000)
+        if state.get("nextRunAtS") is not None and state.get("nextRunAtS", 0) < 1000000000:
+            return True
+        if state.get("lastRunAtS") is not None and state.get("lastRunAtS", 0) < 1000000000:
+            return True
+        
         return False
 
     def _load_store(self) -> CronStore:
