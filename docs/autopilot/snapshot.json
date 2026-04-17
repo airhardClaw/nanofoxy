@@ -1,0 +1,59 @@
+{
+  "generated_at": 1776434159.7630024,
+  "repo_name": "nanofoxy",
+  "repo_path": "/home/sir-airhard/nanofoxy",
+  "focus": null,
+  "counts": {
+    "queued": 0,
+    "accepted": 0,
+    "preparing": 0,
+    "running": 0,
+    "verifying": 0,
+    "pr_open": 0,
+    "waiting_ci": 0,
+    "repairing": 0,
+    "completed": 0,
+    "merged": 0,
+    "failed": 0,
+    "rejected": 0,
+    "superseded": 0
+  },
+  "status_order": [
+    "queued",
+    "accepted",
+    "preparing",
+    "running",
+    "verifying",
+    "pr_open",
+    "waiting_ci",
+    "repairing",
+    "completed",
+    "merged",
+    "failed",
+    "rejected",
+    "superseded"
+  ],
+  "columns": {
+    "queued": [],
+    "accepted": [],
+    "preparing": [],
+    "running": [],
+    "verifying": [],
+    "pr_open": [],
+    "waiting_ci": [],
+    "repairing": [],
+    "completed": [],
+    "merged": [],
+    "failed": [],
+    "rejected": [],
+    "superseded": []
+  },
+  "cards": [],
+  "journal": [],
+  "policies": {
+    "autopilot": "/home/sir-airhard/nanofoxy/.openharness/autopilot/autopilot_policy.yaml",
+    "verification": "/home/sir-airhard/nanofoxy/.openharness/autopilot/verification_policy.yaml",
+    "release": "/home/sir-airhard/nanofoxy/.openharness/autopilot/release_policy.yaml"
+  },
+  "active_context": "# Active Repo Context\n\nGenerated at: 2026-04-17 13:55:59 UTC\n\n## Current Task Focus\n- No active repo task focus yet.\n\n## In Progress\n- None.\n\n## Next Up\n- No queued items.\n\n## Recently Completed\n- None yet.\n\n## Recent Failures\n- None.\n\n## Recent Repo Journal\n- Journal is empty.\n\n## Policies\n- Autopilot: /home/sir-airhard/nanofoxy/.openharness/autopilot/autopilot_policy.yaml\n- Verification: /home/sir-airhard/nanofoxy/.openharness/autopilot/verification_policy.yaml\n- Release: /home/sir-airhard/nanofoxy/.openharness/autopilot/release_policy.yaml"
+}
